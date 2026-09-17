@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+require_once __DIR__ . '/version.php';
 require_once __DIR__ . '/src/Database.php';
 require_once __DIR__ . '/src/ArrService.php';
 require_once __DIR__ . '/src/BatchSyncService.php';
