@@ -81,11 +81,26 @@ CREATE TABLE IF NOT EXISTS series (
     FOREIGN KEY(instance_id) REFERENCES instances(id) ON DELETE CASCADE
 );
 
+CREATE TABLE IF NOT EXISTS sync_jobs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    instance_id INTEGER NOT NULL,
+    status TEXT NOT NULL DEFAULT 'queued' CHECK(status IN ('queued','running','completed','failed')),
+    current_item INTEGER NOT NULL DEFAULT 0,
+    total_items INTEGER NOT NULL DEFAULT 0,
+    current_title TEXT NULL,
+    message TEXT NULL,
+    started_at TEXT NULL,
+    finished_at TEXT NULL,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY(instance_id) REFERENCES instances(id) ON DELETE CASCADE
+);
+
 CREATE INDEX IF NOT EXISTS idx_users_username ON users(username);
 CREATE INDEX IF NOT EXISTS idx_movies_title ON movies(title);
 CREATE INDEX IF NOT EXISTS idx_series_title ON series(title);
 CREATE INDEX IF NOT EXISTS idx_movies_instance ON movies(instance_id);
 CREATE INDEX IF NOT EXISTS idx_series_instance ON series(instance_id);
+CREATE INDEX IF NOT EXISTS idx_sync_jobs_instance ON sync_jobs(instance_id, id DESC);
 SQL);
     }
 }
