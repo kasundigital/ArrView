@@ -19,12 +19,22 @@ final class Database
         ]);
 
         $this->pdo->exec('PRAGMA journal_mode=WAL;');
+        $this->pdo->exec('PRAGMA foreign_keys=ON;');
         $this->migrate();
     }
 
     private function migrate(): void
     {
         $this->pdo->exec(<<<SQL
+CREATE TABLE IF NOT EXISTS users (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    username TEXT NOT NULL UNIQUE COLLATE NOCASE,
+    password_hash TEXT NOT NULL,
+    role TEXT NOT NULL DEFAULT 'viewer' CHECK(role IN ('admin','viewer')),
+    enabled INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
 CREATE TABLE IF NOT EXISTS instances (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     name TEXT NOT NULL,
@@ -71,6 +81,7 @@ CREATE TABLE IF NOT EXISTS series (
     FOREIGN KEY(instance_id) REFERENCES instances(id) ON DELETE CASCADE
 );
 
+CREATE INDEX IF NOT EXISTS idx_users_username ON users(username);
 CREATE INDEX IF NOT EXISTS idx_movies_title ON movies(title);
 CREATE INDEX IF NOT EXISTS idx_series_title ON series(title);
 CREATE INDEX IF NOT EXISTS idx_movies_instance ON movies(instance_id);
