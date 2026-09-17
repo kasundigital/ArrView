@@ -11,8 +11,7 @@ final class ArrService
     public function test(array $instance): array
     {
         try {
-            $endpoint = $instance['type'] === 'radarr' ? '/api/v3/system/status' : '/api/v3/system/status';
-            $data = $this->request($instance, $endpoint);
+            $data = $this->request($instance, '/api/v3/system/status');
             return [
                 'ok' => true,
                 'message' => ($data['appName'] ?? ucfirst($instance['type'])) . ' ' . ($data['version'] ?? '') . ' connected',
@@ -27,6 +26,112 @@ final class ArrService
         return $instance['type'] === 'radarr'
             ? $this->syncRadarr($instance)
             : $this->syncSonarr($instance);
+    }
+
+    public function diagnoseMissingMovie(array $instance, int $movieId): array
+    {
+        if (($instance['type'] ?? '') !== 'radarr') {
+            throw new RuntimeException('Missing movie diagnostics are available for Radarr only.');
+        }
+
+        $movie = $this->request($instance, '/api/v3/movie/' . $movieId);
+        if (!empty($movie['hasFile'])) {
+            return [
+                'status' => 'available',
+                'summary' => 'Radarr reports this movie as available.',
+                'releases' => [],
+                'categories' => [],
+                'blocklist' => [],
+            ];
+        }
+
+        $categories = [];
+        if (empty($movie['monitored'])) {
+            $categories['Not monitored'][] = 'Movie is not monitored, so Radarr will not automatically search/grab it.';
+        }
+
+        $minimumAvailability = $movie['minimumAvailability'] ?? null;
+        $digitalRelease = $movie['digitalRelease'] ?? null;
+        $physicalRelease = $movie['physicalRelease'] ?? null;
+        $inCinemas = $movie['inCinemas'] ?? null;
+
+        $blocklist = [];
+        try {
+            $blocklist = $this->request($instance, '/api/v3/blocklist/movie?movieId=' . $movieId);
+            if ($blocklist) {
+                $categories['Blocklisted releases'][] = count($blocklist) . ' previous release(s) are blocklisted for this movie.';
+            }
+        } catch (Throwable) {
+            $blocklist = [];
+        }
+
+        // This endpoint performs a live indexer search. Keep it on-demand only.
+        $releases = $this->request($instance, '/api/v3/release?movieId=' . $movieId);
+        $releaseRows = [];
+        $accepted = 0;
+
+        foreach ($releases as $release) {
+            $rejections = $release['rejections'] ?? $release['rejectionReasons'] ?? [];
+            if (!is_array($rejections)) {
+                $rejections = [$rejections];
+            }
+            $rejections = array_values(array_filter(array_map(static fn($v) => trim((string)$v), $rejections)));
+            $isRejected = !empty($release['rejected']) || !empty($rejections);
+            if (!$isRejected) {
+                $accepted++;
+            }
+
+            foreach ($rejections as $reason) {
+                $category = $this->classifyRejection($reason);
+                $categories[$category][] = $reason;
+            }
+
+            $releaseRows[] = [
+                'title' => (string)($release['title'] ?? 'Unknown release'),
+                'indexer' => (string)($release['indexer'] ?? $release['indexerName'] ?? 'Unknown indexer'),
+                'size' => isset($release['size']) ? (int)$release['size'] : null,
+                'quality' => $release['quality']['quality']['name'] ?? null,
+                'languages' => $this->languageNames($release['languages'] ?? []),
+                'rejected' => $isRejected,
+                'rejections' => $rejections,
+            ];
+        }
+
+        foreach ($categories as $name => $messages) {
+            $categories[$name] = array_values(array_unique($messages));
+        }
+
+        if (!$releases) {
+            $categories['No releases found'][] = 'Radarr did not receive any matching releases from the enabled indexers.';
+        } elseif ($accepted > 0) {
+            $categories['Acceptable releases found'][] = $accepted . ' release(s) passed Radarr rejection checks but have not been grabbed yet.';
+        }
+
+        $summary = match (true) {
+            !$releases => 'No releases were returned by Radarr indexers.',
+            $accepted > 0 => $accepted . ' acceptable release(s) found. Check delay, queue, download client, or grab history if the movie remains missing.',
+            !empty($categories) => 'Releases were found, but Radarr rejected them. See the reasons below.',
+            default => 'Movie is missing and no specific rejection reason was returned.',
+        };
+
+        return [
+            'status' => 'missing',
+            'summary' => $summary,
+            'movie' => [
+                'title' => $movie['title'] ?? 'Unknown',
+                'year' => $movie['year'] ?? null,
+                'monitored' => !empty($movie['monitored']),
+                'minimumAvailability' => $minimumAvailability,
+                'inCinemas' => $inCinemas,
+                'digitalRelease' => $digitalRelease,
+                'physicalRelease' => $physicalRelease,
+                'qualityProfileId' => $movie['qualityProfileId'] ?? null,
+            ],
+            'categories' => $categories,
+            'releases' => $releaseRows,
+            'accepted_count' => $accepted,
+            'blocklist' => $blocklist,
+        ];
     }
 
     private function syncRadarr(array $instance): array
@@ -134,7 +239,7 @@ SQL;
         curl_setopt_array($ch, [
             CURLOPT_RETURNTRANSFER => true,
             CURLOPT_CONNECTTIMEOUT => 5,
-            CURLOPT_TIMEOUT => 30,
+            CURLOPT_TIMEOUT => 60,
             CURLOPT_HTTPHEADER => ['X-Api-Key: ' . $instance['api_key'], 'Accept: application/json'],
         ]);
         $body = curl_exec($ch);
@@ -179,15 +284,41 @@ SQL;
         $mediaInfo = $file['mediaInfo'] ?? [];
         $value = $mediaInfo['audioLanguages'] ?? $mediaInfo['audioLanguage'] ?? null;
         if (is_array($value)) {
-            $parts = [];
-            foreach ($value as $language) {
-                $parts[] = is_array($language)
-                    ? ($language['name'] ?? $language['englishName'] ?? $language['iso6391'] ?? '')
-                    : (string)$language;
-            }
-            return implode(', ', array_filter($parts));
+            return $this->languageNames($value);
         }
         return $value ? (string)$value : null;
+    }
+
+    private function languageNames(array $languages): ?string
+    {
+        $parts = [];
+        foreach ($languages as $language) {
+            $parts[] = is_array($language)
+                ? ($language['name'] ?? $language['englishName'] ?? $language['iso6391'] ?? '')
+                : (string)$language;
+        }
+        $parts = array_values(array_filter(array_unique($parts)));
+        return $parts ? implode(', ', $parts) : null;
+    }
+
+    private function classifyRejection(string $reason): string
+    {
+        $r = strtolower($reason);
+        return match (true) {
+            str_contains($r, 'size') || str_contains($r, 'larger than') || str_contains($r, 'smaller than') => 'Size limit',
+            str_contains($r, 'language') => 'Language',
+            str_contains($r, 'quality') || str_contains($r, 'profile') => 'Quality / profile',
+            str_contains($r, 'custom format') || str_contains($r, 'score') => 'Custom format score',
+            str_contains($r, 'blocklist') || str_contains($r, 'blacklist') => 'Blocklisted',
+            str_contains($r, 'seed') || str_contains($r, 'peer') => 'Peers / seeders',
+            str_contains($r, 'age') || str_contains($r, 'retention') => 'Age / retention',
+            str_contains($r, 'indexer') => 'Indexer',
+            str_contains($r, 'release type') || str_contains($r, 'edition') => 'Release type / edition',
+            str_contains($r, 'upgrade') => 'Upgrade rules',
+            str_contains($r, 'monitored') => 'Not monitored',
+            str_contains($r, 'year') || str_contains($r, 'movie') => 'Movie matching',
+            default => 'Other Radarr rejection',
+        };
     }
 
     private function removeStale(string $table, int $instanceId, array $seen): void
