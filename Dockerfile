@@ -1,7 +1,8 @@
 FROM php:8.3-cli-alpine
 
 RUN apk add --no-cache curl-dev sqlite-dev \
-    && docker-php-ext-install curl pdo_sqlite
+    && docker-php-ext-install curl pdo_sqlite \
+    && echo "memory_limit=512M" > /usr/local/etc/php/conf.d/arrview.ini
 
 WORKDIR /app
 COPY app /app
