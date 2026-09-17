@@ -23,7 +23,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         } elseif (in_array($action, ['test','sync'], true)) {
             $stmt = $pdo->prepare('SELECT * FROM instances WHERE id=?'); $stmt->execute([(int)($_POST['id'] ?? 0)]); $instance=$stmt->fetch();
             if (!$instance) throw new RuntimeException('Instance not found.');
-            $result = $action === 'test' ? $arr->test($instance) : $arr->syncInstance($instance);
+            $result = $action === 'test' ? $arr->test($instance) : $batchSync->syncInstance($instance);
             if (!$result['ok']) throw new RuntimeException($result['message']);
             $message = $result['message'];
         }
