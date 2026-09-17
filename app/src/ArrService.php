@@ -39,21 +39,23 @@ final class ArrService
             return [
                 'status' => 'available',
                 'summary' => 'Radarr reports this movie as available.',
+                'diagnosis' => [
+                    'label' => 'Available',
+                    'severity' => 'good',
+                    'detail' => 'Radarr reports a movie file for this title.',
+                ],
                 'releases' => [],
                 'categories' => [],
                 'blocklist' => [],
+                'queue' => [],
+                'history' => [],
             ];
         }
 
         $categories = [];
         if (empty($movie['monitored'])) {
-            $categories['Not monitored'][] = 'Movie is not monitored, so Radarr will not automatically search/grab it.';
+            $categories['Not monitored'][] = 'Movie is not monitored, so Radarr will not automatically search or grab it.';
         }
-
-        $minimumAvailability = $movie['minimumAvailability'] ?? null;
-        $digitalRelease = $movie['digitalRelease'] ?? null;
-        $physicalRelease = $movie['physicalRelease'] ?? null;
-        $inCinemas = $movie['inCinemas'] ?? null;
 
         $blocklist = [];
         try {
@@ -63,6 +65,92 @@ final class ArrService
             }
         } catch (Throwable) {
             $blocklist = [];
+        }
+
+        $queueRows = [];
+        try {
+            $queue = $this->request($instance, '/api/v3/queue/details?movieId=' . $movieId . '&includeMovie=false');
+            foreach ($queue as $item) {
+                $messages = [];
+                foreach (($item['statusMessages'] ?? []) as $statusMessage) {
+                    if (!empty($statusMessage['title'])) {
+                        $messages[] = (string)$statusMessage['title'];
+                    }
+                    foreach (($statusMessage['messages'] ?? []) as $message) {
+                        $messages[] = (string)$message;
+                    }
+                }
+                if (!empty($item['errorMessage'])) {
+                    $messages[] = (string)$item['errorMessage'];
+                }
+                $messages = array_values(array_unique(array_filter(array_map('trim', $messages))));
+
+                $state = (string)($item['trackedDownloadState'] ?? '');
+                $trackedStatus = (string)($item['trackedDownloadStatus'] ?? '');
+
+                if ($state === 'importBlocked') {
+                    $categories['Import blocked'][] = $messages[0] ?? 'Radarr reports that import is blocked.';
+                } elseif (in_array($state, ['failed', 'failedPending'], true) || $trackedStatus === 'error') {
+                    $categories['Download failed'][] = $messages[0] ?? 'Radarr reports a failed download.';
+                } elseif ($state === 'importPending' || $state === 'importing') {
+                    $categories['Import pending'][] = $messages[0] ?? 'Download completed and Radarr is waiting to import it.';
+                } elseif ($state === 'downloading') {
+                    $categories['Currently downloading'][] = 'A release is currently in the download queue.';
+                }
+
+                $queueRows[] = [
+                    'title' => (string)($item['title'] ?? 'Queued release'),
+                    'state' => $state ?: (string)($item['status'] ?? 'unknown'),
+                    'tracked_status' => $trackedStatus,
+                    'status' => (string)($item['status'] ?? ''),
+                    'size' => isset($item['size']) ? (int)$item['size'] : null,
+                    'size_left' => isset($item['sizeleft']) ? (int)$item['sizeleft'] : null,
+                    'time_left' => $item['timeleft'] ?? null,
+                    'download_client' => $item['downloadClient'] ?? null,
+                    'output_path' => $item['outputPath'] ?? null,
+                    'messages' => $messages,
+                ];
+            }
+        } catch (Throwable) {
+            $queueRows = [];
+        }
+
+        $historyRows = [];
+        try {
+            $history = $this->request($instance, '/api/v3/history/movie?movieId=' . $movieId . '&includeMovie=false');
+            foreach (array_slice($history, 0, 50) as $event) {
+                $eventType = (string)($event['eventType'] ?? '');
+                $data = is_array($event['data'] ?? null) ? $event['data'] : [];
+                $message = null;
+
+                if ($eventType === 'downloadFailed') {
+                    $message = (string)($data['message'] ?? 'A previous download failed.');
+                    $categories['Download failed'][] = $message;
+                } elseif ($eventType === 'downloadIgnored') {
+                    $message = (string)($data['message'] ?? 'A previous download was ignored.');
+                    $categories['Download ignored'][] = $message;
+                } elseif ($eventType === 'movieFileDeleted') {
+                    $reason = (string)($data['reason'] ?? 'Unknown');
+                    $message = 'A movie file was deleted. Reason: ' . $reason . '.';
+                    $categories['File deleted'][] = $message;
+                } elseif ($eventType === 'downloadFolderImported') {
+                    $message = 'Radarr previously imported a completed download.';
+                } elseif ($eventType === 'grabbed') {
+                    $message = 'Radarr previously grabbed this release.';
+                }
+
+                $historyRows[] = [
+                    'event_type' => $eventType,
+                    'date' => $event['date'] ?? null,
+                    'source_title' => (string)($event['sourceTitle'] ?? ''),
+                    'quality' => $event['quality']['quality']['name'] ?? null,
+                    'languages' => $this->languageNames($event['languages'] ?? []),
+                    'message' => $message,
+                    'data' => $data,
+                ];
+            }
+        } catch (Throwable) {
+            $historyRows = [];
         }
 
         // This endpoint performs a live indexer search. Keep it on-demand only.
@@ -104,33 +192,176 @@ final class ArrService
         if (!$releases) {
             $categories['No releases found'][] = 'Radarr did not receive any matching releases from the enabled indexers.';
         } elseif ($accepted > 0) {
-            $categories['Acceptable releases found'][] = $accepted . ' release(s) passed Radarr rejection checks but have not been grabbed yet.';
+            $categories['Acceptable releases found'][] = $accepted . ' release(s) passed Radarr rejection checks.';
         }
 
-        $summary = match (true) {
-            !$releases => 'No releases were returned by Radarr indexers.',
-            $accepted > 0 => $accepted . ' acceptable release(s) found. Check delay, queue, download client, or grab history if the movie remains missing.',
-            !empty($categories) => 'Releases were found, but Radarr rejected them. See the reasons below.',
-            default => 'Movie is missing and no specific rejection reason was returned.',
-        };
+        $diagnosis = $this->buildMissingDiagnosis(
+            $movie,
+            $queueRows,
+            $historyRows,
+            $releaseRows,
+            $accepted,
+            $categories
+        );
 
         return [
             'status' => 'missing',
-            'summary' => $summary,
+            'summary' => $diagnosis['detail'],
+            'diagnosis' => $diagnosis,
             'movie' => [
                 'title' => $movie['title'] ?? 'Unknown',
                 'year' => $movie['year'] ?? null,
                 'monitored' => !empty($movie['monitored']),
-                'minimumAvailability' => $minimumAvailability,
-                'inCinemas' => $inCinemas,
-                'digitalRelease' => $digitalRelease,
-                'physicalRelease' => $physicalRelease,
+                'minimumAvailability' => $movie['minimumAvailability'] ?? null,
+                'inCinemas' => $movie['inCinemas'] ?? null,
+                'digitalRelease' => $movie['digitalRelease'] ?? null,
+                'physicalRelease' => $movie['physicalRelease'] ?? null,
                 'qualityProfileId' => $movie['qualityProfileId'] ?? null,
             ],
             'categories' => $categories,
             'releases' => $releaseRows,
             'accepted_count' => $accepted,
             'blocklist' => $blocklist,
+            'queue' => $queueRows,
+            'history' => $historyRows,
+        ];
+    }
+
+    private function buildMissingDiagnosis(
+        array $movie,
+        array $queue,
+        array $history,
+        array $releases,
+        int $accepted,
+        array $categories
+    ): array {
+        if (empty($movie['monitored'])) {
+            return [
+                'label' => 'Movie is not monitored',
+                'severity' => 'warning',
+                'detail' => 'Radarr will not automatically search or grab this movie until monitoring is enabled.',
+            ];
+        }
+
+        foreach ($queue as $item) {
+            if (($item['state'] ?? '') === 'importBlocked') {
+                return [
+                    'label' => 'Import blocked',
+                    'severity' => 'bad',
+                    'detail' => $item['messages'][0] ?? 'The download exists, but Radarr cannot import it. Check permissions, paths, remote path mappings, free space, and file accessibility.',
+                ];
+            }
+        }
+
+        foreach ($queue as $item) {
+            if (in_array(($item['state'] ?? ''), ['failed', 'failedPending'], true) || ($item['tracked_status'] ?? '') === 'error') {
+                return [
+                    'label' => 'Download failed',
+                    'severity' => 'bad',
+                    'detail' => $item['messages'][0] ?? 'The selected release failed in the download client.',
+                ];
+            }
+        }
+
+        foreach ($queue as $item) {
+            if (in_array(($item['state'] ?? ''), ['importPending', 'importing'], true)) {
+                return [
+                    'label' => 'Waiting for import',
+                    'severity' => 'warning',
+                    'detail' => $item['messages'][0] ?? 'The download has completed and Radarr is waiting to import it.',
+                ];
+            }
+        }
+
+        foreach ($queue as $item) {
+            if (($item['state'] ?? '') === 'downloading') {
+                return [
+                    'label' => 'Currently downloading',
+                    'severity' => 'info',
+                    'detail' => 'A release is currently downloading. The movie will remain missing until download and import finish.',
+                ];
+            }
+        }
+
+        foreach ($history as $event) {
+            if (($event['event_type'] ?? '') === 'downloadFailed') {
+                return [
+                    'label' => 'Previous download failed',
+                    'severity' => 'bad',
+                    'detail' => $event['message'] ?: 'The most relevant recent history contains a failed download.',
+                ];
+            }
+            if (($event['event_type'] ?? '') === 'downloadIgnored') {
+                return [
+                    'label' => 'Download was ignored',
+                    'severity' => 'warning',
+                    'detail' => $event['message'] ?: 'Radarr ignored a previous download for this movie.',
+                ];
+            }
+        }
+
+        $seenGrab = false;
+        foreach ($history as $event) {
+            if (($event['event_type'] ?? '') === 'downloadFolderImported') {
+                break;
+            }
+            if (($event['event_type'] ?? '') === 'grabbed') {
+                $seenGrab = true;
+                break;
+            }
+        }
+        if ($seenGrab && !$queue) {
+            return [
+                'label' => 'Grabbed but not imported',
+                'severity' => 'warning',
+                'detail' => 'Radarr previously grabbed a release, but there is no current queue item or later import event. Check the download client, completed-download handling, paths, and import history.',
+            ];
+        }
+
+        if ($accepted > 0) {
+            return [
+                'label' => 'Acceptable release available',
+                'severity' => 'info',
+                'detail' => $accepted . ' release(s) currently pass Radarr checks. The movie may be waiting on delay-profile rules or has not been grabbed yet.',
+            ];
+        }
+
+        if (!$releases) {
+            return [
+                'label' => 'No releases found',
+                'severity' => 'warning',
+                'detail' => 'Enabled indexers returned no matching releases for this movie.',
+            ];
+        }
+
+        $priority = [
+            'Language' => 'Language requirements are blocking available releases.',
+            'Size limit' => 'Available releases are outside the configured size limits.',
+            'Quality / profile' => 'Available releases do not satisfy the selected quality profile.',
+            'Custom format score' => 'Available releases do not meet the required custom-format score.',
+            'Peers / seeders' => 'Torrent releases do not meet peer or seeder requirements.',
+            'Blocklisted' => 'Matching releases are blocklisted.',
+            'Age / retention' => 'Release age or retention rules are blocking available releases.',
+            'Release type / edition' => 'Release type or edition requirements are blocking available releases.',
+            'Upgrade rules' => 'Upgrade rules reject the available releases.',
+            'Movie matching' => 'Radarr is rejecting releases because movie matching is uncertain.',
+            'Indexer' => 'Indexer-specific rejection rules are blocking releases.',
+        ];
+
+        foreach ($priority as $category => $detail) {
+            if (!empty($categories[$category])) {
+                return [
+                    'label' => $category,
+                    'severity' => 'bad',
+                    'detail' => $detail,
+                ];
+            }
+        }
+
+        return [
+            'label' => 'All releases rejected',
+            'severity' => 'bad',
+            'detail' => 'Radarr found releases, but none currently pass all acceptance rules. Review the rejection list below.',
         ];
     }
 
