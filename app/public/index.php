@@ -48,7 +48,7 @@ function bytesLabel(int|float $bytes): string {
     return number_format($value, $i >= 3 ? 2 : 1) . ' ' . $units[$i];
 }
 ?>
-<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>ArrView <?=e(ARRVIEW_VERSION)?></title><link rel="stylesheet" href="/assets/style.css"></head><body>
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>ArrView <?=e(ARRVIEW_VERSION)?></title><link rel="stylesheet" href="/assets/style.css"><link rel="stylesheet" href="/assets/summary.css"></head><body>
 <header class="topbar"><a class="brand" href="/">ArrView <small class="version-chip">v<?=e(ARRVIEW_VERSION)?></small></a><nav><a href="/?type=movies">Movies</a><a href="/?type=series">Series</a><?php if($currentUser['role']==='admin'):?><a href="/admin.php">Admin</a><?php endif;?><span class="user-chip"><?=e($currentUser['username'])?></span><a href="/logout.php">Logout</a></nav></header>
 <main class="wrap">
 <?php if(!$type):?>
