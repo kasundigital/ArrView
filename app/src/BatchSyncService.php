@@ -49,9 +49,7 @@ SQL;
                         ':file_size' => $movieFile['size'] ?? null,
                     ]);
                     $count++;
-                    if (($count % 25) === 0 || $count === $total) {
-                        $progress?->__invoke($count, $total, (string)($movie['title'] ?? 'Movie'));
-                    }
+                    $progress?->__invoke($count, $total, (string)($movie['title'] ?? 'Movie'));
                     if (($count % 250) === 0) {
                         $this->pdo->commit();
                         $this->pdo->beginTransaction();
@@ -66,9 +64,7 @@ SQL;
             $this->markSync((int)$instance['id'], "OK - {$count} movies (streamed)");
             $progress?->__invoke($count, max($total, $count), 'Completed');
             return ['ok'=>true,'count'=>$count,'message'=>"Synced {$count} movies in streaming batches"];
-        } finally {
-            @unlink($tmp);
-        }
+        } finally { @unlink($tmp); }
     }
 
     private function syncSonarr(array $instance, ?callable $progress): array
@@ -103,9 +99,7 @@ SQL;
                         ':path'=>$series['path'] ?? null,
                     ]);
                     $count++;
-                    if (($count % 25) === 0 || $count === $total) {
-                        $progress?->__invoke($count, $total, (string)($series['title'] ?? 'Series'));
-                    }
+                    $progress?->__invoke($count, $total, (string)($series['title'] ?? 'Series'));
                     if (($count % 250) === 0) {
                         $this->pdo->commit();
                         $this->pdo->beginTransaction();
@@ -120,9 +114,7 @@ SQL;
             $this->markSync((int)$instance['id'], "OK - {$count} series (streamed)");
             $progress?->__invoke($count, max($total, $count), 'Completed');
             return ['ok'=>true,'count'=>$count,'message'=>"Synced {$count} series in streaming batches"];
-        } finally {
-            @unlink($tmp);
-        }
+        } finally { @unlink($tmp); }
     }
 
     private function downloadToTemp(array $instance, string $path): string
@@ -142,21 +134,15 @@ SQL;
         return $tmp;
     }
 
-    private function countObjects(string $file): int
-    {
-        $count = 0;
-        foreach ($this->streamArrayFile($file, false) as $_) $count++;
-        return $count;
-    }
+    private function countObjects(string $file): int { $count=0; foreach($this->streamArrayFile($file,false) as $_)$count++; return $count; }
 
     private function streamArrayFile(string $file, bool $decode = true): Generator
     {
-        $fp = fopen($file, 'rb');
-        if ($fp === false) throw new RuntimeException('Could not read temporary sync file.');
+        $fp=fopen($file,'rb'); if($fp===false) throw new RuntimeException('Could not read temporary sync file.');
         try {
-            $buffer=''; $depth=0; $inString=false; $escape=false; $capturing=false;
-            while (!feof($fp)) {
-                $chunk=fread($fp,65536); if ($chunk===false) throw new RuntimeException('Failed reading streamed Arr response.');
+            $buffer='';$depth=0;$inString=false;$escape=false;$capturing=false;
+            while(!feof($fp)){
+                $chunk=fread($fp,65536); if($chunk===false) throw new RuntimeException('Failed reading streamed Arr response.');
                 $len=strlen($chunk);
                 for($i=0;$i<$len;$i++){
                     $c=$chunk[$i];
@@ -164,12 +150,7 @@ SQL;
                     $buffer.=$c;
                     if($inString){ if($escape)$escape=false; elseif($c==='\\')$escape=true; elseif($c==='"')$inString=false; continue; }
                     if($c==='"')$inString=true; elseif($c==='{')$depth++; elseif($c==='}'){
-                        $depth--;
-                        if($depth===0){
-                            if($decode){ $item=json_decode($buffer,true,512,JSON_THROW_ON_ERROR); if(is_array($item)) yield $item; }
-                            else yield true;
-                            $buffer='';$capturing=false;
-                        }
+                        $depth--; if($depth===0){ if($decode){$item=json_decode($buffer,true,512,JSON_THROW_ON_ERROR);if(is_array($item))yield $item;}else yield true; $buffer='';$capturing=false; }
                     }
                 }
             }
@@ -180,15 +161,15 @@ SQL;
     private function quality(?array $file): ?string { return $file['quality']['quality']['name'] ?? $file['quality']['quality']['resolution'] ?? null; }
     private function audioLanguages(?array $file): ?string
     {
-        if(!$file) return null; $value=($file['mediaInfo']??[])['audioLanguages'] ?? ($file['mediaInfo']??[])['audioLanguage'] ?? null;
-        if(is_array($value)){ $parts=[]; foreach($value as $language)$parts[]=is_array($language)?($language['name']??$language['englishName']??$language['iso6391']??''):(string)$language; $parts=array_values(array_filter(array_unique($parts))); return $parts?implode(', ',$parts):null; }
+        if(!$file)return null;$value=($file['mediaInfo']??[])['audioLanguages']??($file['mediaInfo']??[])['audioLanguage']??null;
+        if(is_array($value)){$parts=[];foreach($value as $language)$parts[]=is_array($language)?($language['name']??$language['englishName']??$language['iso6391']??''):(string)$language;$parts=array_values(array_filter(array_unique($parts)));return $parts?implode(', ',$parts):null;}
         return $value?(string)$value:null;
     }
     private function removeStale(string $table,int $instanceId,array $seen):void
     {
-        if(!$seen)return; $this->pdo->exec('CREATE TEMP TABLE IF NOT EXISTS arrview_seen_ids (id INTEGER PRIMARY KEY)'); $this->pdo->exec('DELETE FROM arrview_seen_ids');
-        $insert=$this->pdo->prepare('INSERT OR IGNORE INTO arrview_seen_ids(id) VALUES(?)'); foreach($seen as $id)$insert->execute([(int)$id]);
-        $stmt=$this->pdo->prepare("DELETE FROM {$table} WHERE instance_id=? AND remote_id NOT IN (SELECT id FROM arrview_seen_ids)"); $stmt->execute([$instanceId]);
+        if(!$seen)return;$this->pdo->exec('CREATE TEMP TABLE IF NOT EXISTS arrview_seen_ids (id INTEGER PRIMARY KEY)');$this->pdo->exec('DELETE FROM arrview_seen_ids');
+        $insert=$this->pdo->prepare('INSERT OR IGNORE INTO arrview_seen_ids(id) VALUES(?)');foreach($seen as $id)$insert->execute([(int)$id]);
+        $stmt=$this->pdo->prepare("DELETE FROM {$table} WHERE instance_id=? AND remote_id NOT IN (SELECT id FROM arrview_seen_ids)");$stmt->execute([$instanceId]);
     }
-    private function markSync(int $id,string $status):void { $stmt=$this->pdo->prepare('UPDATE instances SET last_sync_at=CURRENT_TIMESTAMP,last_status=? WHERE id=?'); $stmt->execute([$status,$id]); }
+    private function markSync(int $id,string $status):void{$stmt=$this->pdo->prepare('UPDATE instances SET last_sync_at=CURRENT_TIMESTAMP,last_status=? WHERE id=?');$stmt->execute([$status,$id]);}
 }
