@@ -2,18 +2,63 @@
 
 ArrView is a lightweight, self-hosted web interface for browsing Radarr and Sonarr libraries with posters, availability, quality, audio language information, search, and multi-instance support.
 
-## Quick start
+## Quick install
+
+No Git clone is required.
 
 ```bash
-git clone https://github.com/kasundigital/ArrView.git
-cd ArrView
-docker compose up -d --build
+docker run -d \
+  --name arrview \
+  --restart unless-stopped \
+  -p 3223:8080 \
+  -v arrview-data:/app/data \
+  ghcr.io/kasundigital/arrview:latest
 ```
 
 Open:
 
 ```text
 http://SERVER-IP:3223
+```
+
+### Update ArrView
+
+```bash
+docker pull ghcr.io/kasundigital/arrview:latest && \
+docker rm -f arrview && \
+docker run -d \
+  --name arrview \
+  --restart unless-stopped \
+  -p 3223:8080 \
+  -v arrview-data:/app/data \
+  ghcr.io/kasundigital/arrview:latest
+```
+
+Your database and settings remain in the `arrview-data` Docker volume.
+
+## Docker Compose
+
+For users who prefer Compose:
+
+```yaml
+services:
+  arrview:
+    image: ghcr.io/kasundigital/arrview:latest
+    container_name: arrview
+    restart: unless-stopped
+    ports:
+      - "3223:8080"
+    volumes:
+      - arrview-data:/app/data
+
+volumes:
+  arrview-data:
+```
+
+Then run:
+
+```bash
+docker compose up -d
 ```
 
 ## Features
@@ -28,18 +73,24 @@ http://SERVER-IP:3223
 - Docker-first deployment
 - Persistent application data
 
-## Docker
+## Docker image
+
+The image is automatically built from `main` and published to:
+
+```text
+ghcr.io/kasundigital/arrview:latest
+```
+
+Supported architectures:
+
+- `linux/amd64`
+- `linux/arm64`
 
 ArrView listens on port `8080` inside the container and is published on host port `3223` by default.
 
-```yaml
-ports:
-  - "3223:8080"
-```
-
 ## Data
 
-Persistent application data is stored in `/app/data` inside the container. Docker Compose maps this to the `arrview-data` volume.
+Persistent application data is stored in `/app/data` inside the container. The examples above store this in the `arrview-data` Docker volume.
 
 ## Roadmap
 
