@@ -76,12 +76,13 @@ SQL;
             $seen = [];
             $count = 0;
             $sql = <<<'SQL'
-INSERT INTO series (instance_id, remote_id, title, year, poster_url, monitored, episode_count, episode_file_count, path, updated_at)
-VALUES (:instance_id, :remote_id, :title, :year, :poster_url, :monitored, :episode_count, :episode_file_count, :path, CURRENT_TIMESTAMP)
+INSERT INTO series (instance_id, remote_id, title, year, poster_url, monitored, episode_count, episode_file_count, audio_languages, path, updated_at)
+VALUES (:instance_id, :remote_id, :title, :year, :poster_url, :monitored, :episode_count, :episode_file_count, :audio_languages, :path, CURRENT_TIMESTAMP)
 ON CONFLICT(instance_id, remote_id) DO UPDATE SET
  title=excluded.title, year=excluded.year, poster_url=excluded.poster_url,
  monitored=excluded.monitored, episode_count=excluded.episode_count,
- episode_file_count=excluded.episode_file_count, path=excluded.path, updated_at=CURRENT_TIMESTAMP
+ episode_file_count=excluded.episode_file_count, audio_languages=excluded.audio_languages,
+ path=excluded.path, updated_at=CURRENT_TIMESTAMP
 SQL;
             $stmt = $this->pdo->prepare($sql);
             $this->pdo->beginTransaction();
@@ -91,16 +92,27 @@ SQL;
                     if (!$remoteId) continue;
                     $seen[] = $remoteId;
                     $stats = $series['statistics'] ?? [];
+                    $fileCount = (int)($stats['episodeFileCount'] ?? 0);
+                    $audioLanguages = null;
+
+                    if ($fileCount > 0) {
+                        try {
+                            $audioLanguages = $this->seriesAudioLanguages($instance, $remoteId);
+                        } catch (Throwable) {
+                            $audioLanguages = null;
+                        }
+                    }
+
                     $stmt->execute([
                         ':instance_id'=>(int)$instance['id'], ':remote_id'=>$remoteId,
                         ':title'=>(string)($series['title'] ?? 'Unknown'), ':year'=>$series['year'] ?? null,
                         ':poster_url'=>$this->poster($series['images'] ?? []), ':monitored'=>!empty($series['monitored']) ? 1 : 0,
-                        ':episode_count'=>(int)($stats['episodeCount'] ?? 0), ':episode_file_count'=>(int)($stats['episodeFileCount'] ?? 0),
-                        ':path'=>$series['path'] ?? null,
+                        ':episode_count'=>(int)($stats['episodeCount'] ?? 0), ':episode_file_count'=>$fileCount,
+                        ':audio_languages'=>$audioLanguages, ':path'=>$series['path'] ?? null,
                     ]);
                     $count++;
                     $progress?->__invoke($count, $total, (string)($series['title'] ?? 'Series'));
-                    if (($count % 250) === 0) {
+                    if (($count % 100) === 0) {
                         $this->pdo->commit();
                         $this->pdo->beginTransaction();
                     }
@@ -111,10 +123,49 @@ SQL;
                 throw $e;
             }
             $this->removeStale('series', (int)$instance['id'], $seen);
-            $this->markSync((int)$instance['id'], "OK - {$count} series (streamed)");
+            $this->markSync((int)$instance['id'], "OK - {$count} series (audio scanned)");
             $progress?->__invoke($count, max($total, $count), 'Completed');
-            return ['ok'=>true,'count'=>$count,'message'=>"Synced {$count} series in streaming batches"];
+            return ['ok'=>true,'count'=>$count,'message'=>"Synced {$count} series with audio-language scan"];
         } finally { @unlink($tmp); }
+    }
+
+    private function seriesAudioLanguages(array $instance, int $seriesId): ?string
+    {
+        $files = $this->requestJson($instance, '/api/v3/episodefile?seriesId=' . $seriesId);
+        $languages = [];
+
+        foreach ($files as $file) {
+            $value = $this->audioLanguages(is_array($file) ? $file : null);
+            if (!$value) continue;
+            foreach (array_map('trim', explode(',', $value)) as $language) {
+                if ($language !== '') $languages[$language] = true;
+            }
+        }
+
+        $names = array_keys($languages);
+        natcasesort($names);
+        return $names ? implode(', ', $names) : null;
+    }
+
+    private function requestJson(array $instance, string $path): array
+    {
+        $ch = curl_init(rtrim((string)$instance['url'], '/') . $path);
+        curl_setopt_array($ch, [
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_CONNECTTIMEOUT => 5,
+            CURLOPT_TIMEOUT => 60,
+            CURLOPT_HTTPHEADER => ['X-Api-Key: '.$instance['api_key'], 'Accept: application/json'],
+        ]);
+        $body = curl_exec($ch);
+        $status = (int)curl_getinfo($ch, CURLINFO_RESPONSE_CODE);
+        $error = curl_error($ch);
+        curl_close($ch);
+
+        if ($body === false || $error) throw new RuntimeException($error ?: 'Connection failed');
+        if ($status < 200 || $status >= 300) throw new RuntimeException("HTTP {$status} from {$instance['type']}");
+        $decoded = json_decode($body, true);
+        if (!is_array($decoded)) throw new RuntimeException('Invalid JSON response');
+        return $decoded;
     }
 
     private function downloadToTemp(array $instance, string $path): string
@@ -161,15 +212,31 @@ SQL;
     private function quality(?array $file): ?string { return $file['quality']['quality']['name'] ?? $file['quality']['quality']['resolution'] ?? null; }
     private function audioLanguages(?array $file): ?string
     {
-        if(!$file)return null;$value=($file['mediaInfo']??[])['audioLanguages']??($file['mediaInfo']??[])['audioLanguage']??null;
-        if(is_array($value)){$parts=[];foreach($value as $language)$parts[]=is_array($language)?($language['name']??$language['englishName']??$language['iso6391']??''):(string)$language;$parts=array_values(array_filter(array_unique($parts)));return $parts?implode(', ',$parts):null;}
+        if(!$file)return null;
+        $value=($file['mediaInfo']??[])['audioLanguages']??($file['mediaInfo']??[])['audioLanguage']??null;
+        if(is_array($value)){
+            $parts=[];
+            foreach($value as $language)$parts[]=is_array($language)?($language['name']??$language['englishName']??$language['iso6391']??''):(string)$language;
+            $parts=array_values(array_filter(array_unique($parts)));
+            return $parts?implode(', ',$parts):null;
+        }
         return $value?(string)$value:null;
     }
+
     private function removeStale(string $table,int $instanceId,array $seen):void
     {
-        if(!$seen)return;$this->pdo->exec('CREATE TEMP TABLE IF NOT EXISTS arrview_seen_ids (id INTEGER PRIMARY KEY)');$this->pdo->exec('DELETE FROM arrview_seen_ids');
-        $insert=$this->pdo->prepare('INSERT OR IGNORE INTO arrview_seen_ids(id) VALUES(?)');foreach($seen as $id)$insert->execute([(int)$id]);
-        $stmt=$this->pdo->prepare("DELETE FROM {$table} WHERE instance_id=? AND remote_id NOT IN (SELECT id FROM arrview_seen_ids)");$stmt->execute([$instanceId]);
+        if(!$seen)return;
+        $this->pdo->exec('CREATE TEMP TABLE IF NOT EXISTS arrview_seen_ids (id INTEGER PRIMARY KEY)');
+        $this->pdo->exec('DELETE FROM arrview_seen_ids');
+        $insert=$this->pdo->prepare('INSERT OR IGNORE INTO arrview_seen_ids(id) VALUES(?)');
+        foreach($seen as $id)$insert->execute([(int)$id]);
+        $stmt=$this->pdo->prepare("DELETE FROM {$table} WHERE instance_id=? AND remote_id NOT IN (SELECT id FROM arrview_seen_ids)");
+        $stmt->execute([$instanceId]);
     }
-    private function markSync(int $id,string $status):void{$stmt=$this->pdo->prepare('UPDATE instances SET last_sync_at=CURRENT_TIMESTAMP,last_status=? WHERE id=?');$stmt->execute([$status,$id]);}
+
+    private function markSync(int $id,string $status):void
+    {
+        $stmt=$this->pdo->prepare('UPDATE instances SET last_sync_at=CURRENT_TIMESTAMP,last_status=? WHERE id=?');
+        $stmt->execute([$status,$id]);
+    }
 }
