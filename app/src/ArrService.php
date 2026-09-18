@@ -130,7 +130,7 @@ final class ArrService
         ];
     }
 
-    public function diagnoseMissingMovie(array $instance, int $movieId): array
+    public function diagnoseMissingMovie(array $instance, int $movieId, bool $deep = false): array
     {
         if (($instance['type'] ?? '') !== 'radarr') {
             throw new RuntimeException('Missing movie diagnostics are available for Radarr only.');
@@ -255,12 +255,48 @@ final class ArrService
             $historyRows = [];
         }
 
-        // This endpoint performs a live indexer search. Keep it on-demand only.
-        $releases = $this->request($instance, '/api/v3/release?movieId=' . $movieId);
+        if (!$deep) {
+            $diagnosis = $this->buildMissingDiagnosis(
+                $movie,
+                $queueRows,
+                $historyRows,
+                [],
+                0,
+                $categories,
+                false
+            );
+
+            return [
+                'status' => 'missing',
+                'summary' => $diagnosis['detail'],
+                'diagnosis' => $diagnosis,
+                'movie' => [
+                    'title' => $movie['title'] ?? 'Unknown',
+                    'year' => $movie['year'] ?? null,
+                    'monitored' => !empty($movie['monitored']),
+                    'minimumAvailability' => $movie['minimumAvailability'] ?? null,
+                    'inCinemas' => $movie['inCinemas'] ?? null,
+                    'digitalRelease' => $movie['digitalRelease'] ?? null,
+                    'physicalRelease' => $movie['physicalRelease'] ?? null,
+                    'qualityProfileId' => $movie['qualityProfileId'] ?? null,
+                ],
+                'categories' => $categories,
+                'releases' => [],
+                'accepted_count' => 0,
+                'blocklist' => $blocklist,
+                'queue' => $queueRows,
+                'history' => $historyRows,
+                'deep_performed' => false,
+            ];
+        }
+
+        // Deep search is explicit and streamed to keep peak PHP memory bounded.
         $releaseRows = [];
         $accepted = 0;
+        $releaseFound = false;
 
-        foreach ($releases as $release) {
+        foreach ($this->streamRequestArray($instance, '/api/v3/release?movieId=' . $movieId) as $release) {
+            $releaseFound = true;
             $rejections = $release['rejections'] ?? $release['rejectionReasons'] ?? [];
             if (!is_array($rejections)) {
                 $rejections = [$rejections];
@@ -276,22 +312,24 @@ final class ArrService
                 $categories[$category][] = $reason;
             }
 
-            $releaseRows[] = [
-                'title' => (string)($release['title'] ?? 'Unknown release'),
-                'indexer' => (string)($release['indexer'] ?? $release['indexerName'] ?? 'Unknown indexer'),
-                'size' => isset($release['size']) ? (int)$release['size'] : null,
-                'quality' => $release['quality']['quality']['name'] ?? null,
-                'languages' => $this->languageNames($release['languages'] ?? []),
-                'rejected' => $isRejected,
-                'rejections' => $rejections,
-            ];
+            if (count($releaseRows) < 100) {
+                $releaseRows[] = [
+                    'title' => (string)($release['title'] ?? 'Unknown release'),
+                    'indexer' => (string)($release['indexer'] ?? $release['indexerName'] ?? 'Unknown indexer'),
+                    'size' => isset($release['size']) ? (int)$release['size'] : null,
+                    'quality' => $release['quality']['quality']['name'] ?? null,
+                    'languages' => $this->languageNames($release['languages'] ?? []),
+                    'rejected' => $isRejected,
+                    'rejections' => array_slice($rejections, 0, 10),
+                ];
+            }
         }
 
         foreach ($categories as $name => $messages) {
             $categories[$name] = array_values(array_unique($messages));
         }
 
-        if (!$releases) {
+        if (!$releaseFound) {
             $categories['No releases found'][] = 'Radarr did not receive any matching releases from the enabled indexers.';
         } elseif ($accepted > 0) {
             $categories['Acceptable releases found'][] = $accepted . ' release(s) passed Radarr rejection checks.';
@@ -303,7 +341,8 @@ final class ArrService
             $historyRows,
             $releaseRows,
             $accepted,
-            $categories
+            $categories,
+            true
         );
 
         return [
@@ -326,7 +365,123 @@ final class ArrService
             'blocklist' => $blocklist,
             'queue' => $queueRows,
             'history' => $historyRows,
+            'deep_performed' => true,
         ];
+    }
+
+    public function diagnoseMissingEpisode(array $instance, int $episodeId, bool $deep = false): array
+    {
+        if (($instance['type'] ?? '') !== 'sonarr') {
+            throw new RuntimeException('Missing episode diagnostics are available for Sonarr only.');
+        }
+
+        $episode = $this->request($instance, '/api/v3/episode/' . $episodeId);
+        if (!empty($episode['hasFile'])) {
+            return [
+                'diagnosis'=>['label'=>'Available','severity'=>'good','detail'=>'Sonarr reports an episode file for this episode.'],
+                'episode'=>$episode,'queue'=>[],'history'=>[],'categories'=>[],'releases'=>[],'deep_performed'=>false
+            ];
+        }
+
+        $categories = [];
+        if (empty($episode['monitored'])) {
+            $categories['Not monitored'][] = 'This episode is not monitored.';
+        }
+
+        $airDate = $episode['airDateUtc'] ?? null;
+        if ($airDate) {
+            try {
+                if (new DateTimeImmutable($airDate) > new DateTimeImmutable('now', new DateTimeZone('UTC'))) {
+                    $categories['Not aired yet'][] = 'The episode air date is still in the future.';
+                }
+            } catch (Throwable) {
+            }
+        }
+
+        $queueRows = [];
+        try {
+            $queue = $this->request($instance, '/api/v3/queue/details?episodeIds=' . $episodeId . '&includeEpisode=false');
+            foreach ($queue as $item) {
+                $messages=[];
+                foreach (($item['statusMessages'] ?? []) as $statusMessage) {
+                    foreach (($statusMessage['messages'] ?? []) as $message) $messages[]=(string)$message;
+                    if (!empty($statusMessage['title'])) $messages[]=(string)$statusMessage['title'];
+                }
+                if (!empty($item['errorMessage'])) $messages[]=(string)$item['errorMessage'];
+                $state=(string)($item['trackedDownloadState'] ?? $item['status'] ?? '');
+                $tracked=(string)($item['trackedDownloadStatus'] ?? '');
+                if ($state==='importBlocked') $categories['Import blocked'][]=$messages[0] ?? 'Sonarr reports import is blocked.';
+                elseif (in_array($state,['failed','failedPending'],true) || $tracked==='error') $categories['Download failed'][]=$messages[0] ?? 'The download failed.';
+                elseif (in_array($state,['importPending','importing'],true)) $categories['Import pending'][]=$messages[0] ?? 'The episode is waiting for import.';
+                elseif ($state==='downloading') $categories['Currently downloading'][]='The episode is currently downloading.';
+                $queueRows[]=['title'=>$item['title']??'Queued release','state'=>$state,'messages'=>array_values(array_unique($messages)),'download_client'=>$item['downloadClient']??null];
+            }
+        } catch (Throwable) {
+        }
+
+        $historyRows = [];
+        try {
+            $historyResponse = $this->request($instance, '/api/v3/history?episodeId=' . $episodeId . '&page=1&pageSize=50&sortKey=date&sortDirection=descending&includeSeries=false&includeEpisode=false');
+            $history = $historyResponse['records'] ?? $historyResponse;
+            foreach (array_slice(is_array($history)?$history:[],0,50) as $event) {
+                $eventType=(string)($event['eventType'] ?? '');
+                $data=is_array($event['data']??null)?$event['data']:[];
+                if ($eventType==='downloadFailed') $categories['Download failed'][]=(string)($data['message']??'A previous download failed.');
+                $historyRows[]=[
+                    'event_type'=>$eventType,'date'=>$event['date']??null,'source_title'=>$event['sourceTitle']??'',
+                    'quality'=>$event['quality']['quality']['name']??null,'languages'=>$this->languageNames($event['languages']??[]),
+                    'message'=>$data['message']??null
+                ];
+            }
+        } catch (Throwable) {
+        }
+
+        $diagnosis = $this->buildEpisodeDiagnosis($episode,$queueRows,$historyRows,$categories,false,0,[]);
+        if (!$deep) {
+            return ['diagnosis'=>$diagnosis,'episode'=>$episode,'queue'=>$queueRows,'history'=>$historyRows,'categories'=>$categories,'releases'=>[],'deep_performed'=>false];
+        }
+
+        $releaseRows=[];$accepted=0;$found=false;
+        foreach ($this->streamRequestArray($instance, '/api/v3/release?episodeId=' . $episodeId) as $release) {
+            $found=true;
+            $rejections=$release['rejections']??$release['rejectionReasons']??[];
+            if(!is_array($rejections))$rejections=[$rejections];
+            $rejections=array_values(array_filter(array_map(static fn($v)=>trim((string)$v),$rejections)));
+            $isRejected=!empty($release['rejected'])||!empty($rejections);
+            if(!$isRejected)$accepted++;
+            foreach($rejections as $reason)$categories[$this->classifyRejection($reason)][]=$reason;
+            if(count($releaseRows)<100)$releaseRows[]=[
+                'title'=>$release['title']??'Unknown release','indexer'=>$release['indexer']??$release['indexerName']??'Unknown indexer',
+                'quality'=>$release['quality']['quality']['name']??null,'languages'=>$this->languageNames($release['languages']??[]),
+                'size'=>isset($release['size'])?(int)$release['size']:null,'rejected'=>$isRejected,'rejections'=>array_slice($rejections,0,10)
+            ];
+        }
+        if(!$found)$categories['No releases found'][]='Enabled Sonarr indexers returned no matching releases.';
+        elseif($accepted>0)$categories['Acceptable releases found'][]=$accepted.' release(s) passed Sonarr checks.';
+        foreach($categories as $name=>$messages)$categories[$name]=array_values(array_unique(array_slice($messages,0,20)));
+
+        $diagnosis=$this->buildEpisodeDiagnosis($episode,$queueRows,$historyRows,$categories,true,$accepted,$releaseRows);
+        return ['diagnosis'=>$diagnosis,'episode'=>$episode,'queue'=>$queueRows,'history'=>$historyRows,'categories'=>$categories,'releases'=>$releaseRows,'accepted_count'=>$accepted,'deep_performed'=>true];
+    }
+
+    private function buildEpisodeDiagnosis(array $episode,array $queue,array $history,array $categories,bool $deep,int $accepted,array $releases): array
+    {
+        if(empty($episode['monitored'])) return ['label'=>'Episode is not monitored','severity'=>'warning','detail'=>'Sonarr will not automatically grab this episode until monitoring is enabled.'];
+        if(!empty($categories['Not aired yet'])) return ['label'=>'Not aired yet','severity'=>'info','detail'=>'This episode has not aired yet.'];
+        foreach($queue as $item){
+            if(($item['state']??'')==='importBlocked') return ['label'=>'Import blocked','severity'=>'bad','detail'=>$item['messages'][0]??'Sonarr cannot import the completed download.'];
+            if(in_array(($item['state']??''),['failed','failedPending'],true)) return ['label'=>'Download failed','severity'=>'bad','detail'=>$item['messages'][0]??'The episode download failed.'];
+            if(in_array(($item['state']??''),['importPending','importing'],true)) return ['label'=>'Waiting for import','severity'=>'warning','detail'=>$item['messages'][0]??'The download completed and is waiting for import.'];
+            if(($item['state']??'')==='downloading') return ['label'=>'Currently downloading','severity'=>'info','detail'=>'A release is currently downloading.'];
+        }
+        foreach($history as $event) if(($event['event_type']??'')==='downloadFailed') return ['label'=>'Previous download failed','severity'=>'bad','detail'=>$event['message']??'A previous download failed.'];
+        if(!$deep) return ['label'=>'Deep search available','severity'=>'info','detail'=>'No queue/history problem was found. Run Deep Search to inspect indexer releases and rejection reasons.'];
+        if($accepted>0) return ['label'=>'Acceptable release available','severity'=>'info','detail'=>$accepted.' release(s) currently pass Sonarr checks.'];
+        if(!$releases) return ['label'=>'No releases found','severity'=>'warning','detail'=>'Enabled indexers returned no matching releases.'];
+        foreach(['Language','Size limit','Quality / profile','Custom format score','Peers / seeders','Blocklisted','Age / retention','Indexer'] as $category){
+            if(!empty($categories[$category])) return ['label'=>$category,'severity'=>'bad','detail'=>'Sonarr rejection rules in this category are blocking available releases.'];
+        }
+        return ['label'=>'All releases rejected','severity'=>'bad','detail'=>'Sonarr found releases, but none currently pass all acceptance rules.'];
     }
 
     private function buildMissingDiagnosis(
@@ -335,7 +490,8 @@ final class ArrService
         array $history,
         array $releases,
         int $accepted,
-        array $categories
+        array $categories,
+        bool $searchPerformed = true
     ): array {
         if (empty($movie['monitored'])) {
             return [
@@ -425,6 +581,14 @@ final class ArrService
                 'label' => 'Acceptable release available',
                 'severity' => 'info',
                 'detail' => $accepted . ' release(s) currently pass Radarr checks. The movie may be waiting on delay-profile rules or has not been grabbed yet.',
+            ];
+        }
+
+        if (!$searchPerformed) {
+            return [
+                'label' => 'Deep search available',
+                'severity' => 'info',
+                'detail' => 'No queue/history problem was found. Run Deep Search to inspect live indexer releases and rejection reasons.',
             ];
         }
 
@@ -563,6 +727,56 @@ SQL;
         $this->removeStale('series', (int)$instance['id'], $seen);
         $this->markSync($instance['id'], "OK - {$count} series");
         return ['ok' => true, 'count' => $count, 'message' => "Synced {$count} series"];
+    }
+
+    private function streamRequestArray(array $instance, string $path): Generator
+    {
+        $tmp=tempnam(sys_get_temp_dir(),'arrdiag_');
+        if($tmp===false) throw new RuntimeException('Could not create diagnostic temp file.');
+        $fp=fopen($tmp,'w+b');
+        if($fp===false){@unlink($tmp);throw new RuntimeException('Could not open diagnostic temp file.');}
+
+        try {
+            $ch=curl_init(rtrim((string)$instance['url'],'/').$path);
+            curl_setopt_array($ch,[
+                CURLOPT_FILE=>$fp,
+                CURLOPT_CONNECTTIMEOUT=>5,
+                CURLOPT_TIMEOUT=>120,
+                CURLOPT_HTTPHEADER=>['X-Api-Key: '.$instance['api_key'],'Accept: application/json'],
+            ]);
+            $ok=curl_exec($ch);$status=(int)curl_getinfo($ch,CURLINFO_RESPONSE_CODE);$error=curl_error($ch);curl_close($ch);
+            fclose($fp);
+            if($ok===false||$error) throw new RuntimeException($error?:'Connection failed');
+            if($status<200||$status>=300) throw new RuntimeException("HTTP {$status} from {$instance['type']}");
+
+            $fp=fopen($tmp,'rb');
+            if($fp===false) throw new RuntimeException('Could not read diagnostic response.');
+            try {
+                $buffer='';$depth=0;$inString=false;$escape=false;$capturing=false;
+                while(!feof($fp)){
+                    $chunk=fread($fp,65536);
+                    if($chunk===false) throw new RuntimeException('Failed reading diagnostic response.');
+                    $len=strlen($chunk);
+                    for($i=0;$i<$len;$i++){
+                        $chv=$chunk[$i];
+                        if(!$capturing){if($chv==='{'){$capturing=true;$depth=1;$buffer='{';$inString=false;$escape=false;}continue;}
+                        $buffer.=$chv;
+                        if($inString){if($escape)$escape=false;elseif($chv==='\\')$escape=true;elseif($chv==='"')$inString=false;continue;}
+                        if($chv==='"')$inString=true;elseif($chv==='{')$depth++;elseif($chv==='}'){
+                            $depth--;
+                            if($depth===0){
+                                $item=json_decode($buffer,true,512,JSON_THROW_ON_ERROR);
+                                if(is_array($item))yield $item;
+                                $buffer='';$capturing=false;
+                            }
+                        }
+                    }
+                }
+            } finally { fclose($fp); }
+        } finally {
+            if(is_resource($fp)) @fclose($fp);
+            @unlink($tmp);
+        }
     }
 
     private function request(array $instance, string $path): array
