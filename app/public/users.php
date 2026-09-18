@@ -38,7 +38,7 @@ if ($_SERVER['REQUEST_METHOD']==='POST') {
 $users=$pdo->query('SELECT id,username,role,enabled,created_at FROM users ORDER BY username COLLATE NOCASE')->fetchAll();
 ?>
 <!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Users · ArrView</title><link rel="stylesheet" href="/assets/style.css"></head><body>
-<header class="topbar"><a class="brand" href="/">ArrView</a><nav><a href="/">Library</a><a href="/admin.php">Instances</a><a class="active" href="/users.php">Users</a><a href="/logout.php">Logout</a></nav></header>
+<header class="topbar"><a class="brand" href="/">ArrView <small class="version-chip">v<?=e(ARRVIEW_VERSION)?></small></a><nav><a href="/">Library</a><a href="/admin.php">Instances</a><a class="active" href="/users.php">Users</a><a href="/support.php">Support</a><a href="/logout.php">Logout</a></nav></header>
 <main class="wrap admin-wrap"><section class="catalog-head"><div><p class="eyebrow">ADMIN</p><h1>Users</h1></div></section>
 <?php if($message):?><div class="notice success"><?=e($message)?></div><?php endif;?><?php if($error):?><div class="notice error"><?=e($error)?></div><?php endif;?>
 <section class="panel"><h2>Add User</h2><form method="post" class="instance-form"><input type="hidden" name="action" value="add"><label>Username<input name="username" minlength="3" required></label><label>Role<select name="role"><option value="viewer">Viewer</option><option value="admin">Admin</option></select></label><label>Password<input name="password" type="password" minlength="8" required></label><label>Confirm<input name="confirm_password" type="password" minlength="8" required></label><button class="primary">Create User</button></form></section>
