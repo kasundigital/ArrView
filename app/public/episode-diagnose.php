@@ -20,6 +20,99 @@ try{
 }catch(Throwable $e){$error=$e->getMessage();}
 
 function epDate(?string $date):string{if(!$date)return '—';try{return(new DateTime($date))->format('Y-m-d H:i:s');}catch(Throwable){return$date;}}
+
+function sonarrDisplayCategory(string $name): string {
+    return $name === 'Other Radarr rejection' ? 'Other Sonarr rejection' : $name;
+}
+
+function sonarrIssueSummary(array $result, array $episode): array {
+    $categories = is_array($result['categories'] ?? null) ? $result['categories'] : [];
+    $releases = is_array($result['releases'] ?? null) ? $result['releases'] : [];
+    $deep = !empty($result['deep_performed']);
+    $accepted = (int)($result['accepted_count'] ?? 0);
+    $found = count($releases);
+    $rejected = 0;
+    foreach ($releases as $release) if (!empty($release['rejected'])) $rejected++;
+
+    $reasonCounts = [];
+    foreach ($releases as $release) {
+        foreach (($release['rejections'] ?? []) as $reason) {
+            $reason = trim((string)$reason);
+            if ($reason === '') continue;
+            $reasonCounts[$reason] = ($reasonCounts[$reason] ?? 0) + 1;
+        }
+    }
+    arsort($reasonCounts);
+
+    if (!empty($result['episode']['hasFile'])) {
+        return ['title'=>'Episode is available','severity'=>'good','detail'=>'Sonarr reports a file for this episode.','found'=>$found,'rejected'=>$rejected,'accepted'=>$accepted];
+    }
+    if (empty($result['episode']['monitored'])) {
+        return ['title'=>'Not downloading because monitoring is disabled','severity'=>'warning','detail'=>'Enable monitoring in Sonarr if this episode should be downloaded automatically.','found'=>$found,'rejected'=>$rejected,'accepted'=>$accepted];
+    }
+    if (!empty($categories['Not aired yet'])) {
+        return ['title'=>'Not downloading because the episode has not aired yet','severity'=>'info','detail'=>'This is a future episode, so a missing file is expected.','found'=>$found,'rejected'=>$rejected,'accepted'=>$accepted];
+    }
+    foreach (['Import blocked','Download failed','Import pending','Currently downloading'] as $category) {
+        if (!empty($categories[$category])) {
+            return [
+                'title'=>$category,
+                'severity'=>in_array($category,['Import blocked','Download failed'],true)?'bad':'warning',
+                'detail'=>(string)($categories[$category][0] ?? ''),
+                'found'=>$found,'rejected'=>$rejected,'accepted'=>$accepted
+            ];
+        }
+    }
+
+    if (!$deep) {
+        return [
+            'title'=>'No immediate queue/history problem found',
+            'severity'=>'info',
+            'detail'=>'Run Deep Search to check live Sonarr releases and see exactly why available releases are rejected.',
+            'found'=>$found,'rejected'=>$rejected,'accepted'=>$accepted
+        ];
+    }
+
+    if (!empty($categories['No releases found']) || $found === 0) {
+        return ['title'=>'No matching releases found','severity'=>'warning','detail'=>'Enabled Sonarr indexers did not return a matching release for this episode.','found'=>$found,'rejected'=>$rejected,'accepted'=>$accepted];
+    }
+
+    if ($accepted > 0) {
+        return ['title'=>'Acceptable release exists','severity'=>'info','detail'=>$accepted.' release(s) currently pass Sonarr rules. Check the queue/history if Sonarr still has not grabbed one.','found'=>$found,'rejected'=>$rejected,'accepted'=>$accepted];
+    }
+
+    $unknownSeries = 0;
+    $qualityProfile = 0;
+    $languageReject = 0;
+    $sizeReject = 0;
+    foreach ($reasonCounts as $reason=>$count) {
+        $lower = strtolower($reason);
+        if (str_contains($lower,'unknown series')) $unknownSeries += $count;
+        if (str_contains($lower,'profile') || str_contains($lower,'quality')) $qualityProfile += $count;
+        if (str_contains($lower,'language')) $languageReject += $count;
+        if (str_contains($lower,'size') || str_contains($lower,'too large') || str_contains($lower,'too small')) $sizeReject += $count;
+    }
+
+    $parts = [];
+    if ($qualityProfile > 0) $parts[] = $qualityProfile.' release'.($qualityProfile===1?' is':'s are').' blocked by the quality/profile rules';
+    if ($unknownSeries > 0) $parts[] = $unknownSeries.' release'.($unknownSeries===1?' is':'s are').' rejected as Unknown Series';
+    if ($languageReject > 0) $parts[] = $languageReject.' release'.($languageReject===1?' is':'s are').' rejected by language rules';
+    if ($sizeReject > 0) $parts[] = $sizeReject.' release'.($sizeReject===1?' is':'s are').' rejected by size limits';
+
+    if (!$parts && $reasonCounts) {
+        $topReason = array_key_first($reasonCounts);
+        $parts[] = ($reasonCounts[$topReason] ?? 0).' release(s) are rejected because: '.$topReason;
+    }
+
+    return [
+        'title'=>'All found releases are being rejected',
+        'severity'=>'bad',
+        'detail'=>$parts ? implode('. ', $parts).'.' : 'Sonarr found releases, but none pass the current rules.',
+        'found'=>$found,
+        'rejected'=>$rejected,
+        'accepted'=>$accepted
+    ];
+}
 ?>
 <!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Episode Diagnostics · ArrView</title><link rel="stylesheet" href="/assets/style.css"></head><body>
 <header class="topbar"><a class="brand" href="/">ArrView <small class="version-chip">v<?=e(ARRVIEW_VERSION)?></small></a><nav><a href="/?type=movies">Movies</a><a class="active" href="/?type=series">Series</a><a href="/support.php">Support</a><?php if($currentUser['role']==='admin'):?><a href="/admin.php">Admin</a><?php endif;?><span class="user-chip"><?=e($currentUser['username'])?></span><a href="/logout.php">Logout</a></nav></header>
@@ -31,7 +124,26 @@ function epDate(?string $date):string{if(!$date)return '—';try{return(new Date
 <?php elseif($result):
 $diag=$result['diagnosis']??['label'=>'Unknown','severity'=>'warning','detail'=>''];
 ?>
-<section class="diagnosis-hero diag-<?=e($diag['severity']??'warning')?>"><div><p class="eyebrow">PRIMARY DIAGNOSIS</p><h2><?=e($diag['label'])?></h2><p><?=e($diag['detail'])?></p></div><span class="diagnosis-state"><?=e(strtoupper($diag['severity']??'warning'))?></span></section>
+<?php $issueSummary=sonarrIssueSummary($result,$episode); ?>
+<section class="issue-summary-card diag-<?=e($issueSummary['severity'])?>">
+  <div class="issue-summary-main">
+    <p class="eyebrow">WHY IT IS NOT DOWNLOADING</p>
+    <h2><?=e($issueSummary['title'])?></h2>
+    <p><?=e($issueSummary['detail'])?></p>
+    <?php if(!empty($result['deep_performed'])):?><div class="issue-counts">
+      <span><b><?=number_format((int)$issueSummary['found'])?></b> releases found</span>
+      <span><b><?=number_format((int)$issueSummary['rejected'])?></b> rejected</span>
+      <span><b><?=number_format((int)$issueSummary['accepted'])?></b> accepted</span>
+    </div><?php endif;?>
+  </div>
+  <div class="issue-side-status">
+    <div><span>Download</span><strong class="status-bad"><?=empty($result['episode']['hasFile'])?'Blocked / Missing':'Available'?></strong></div>
+    <div><span>Audio</span><strong><?=!empty($episode['has_file'])?e($episode['audio_languages']?:'Unknown'):'Not available until file exists'?></strong></div>
+    <div><span>Subtitles</span><strong>Not checked</strong><small>Needs Bazarr/subtitle integration</small></div>
+  </div>
+</section>
+
+<section class="diagnosis-hero diag-<?=e($diag['severity']??'warning')?>"><div><p class="eyebrow">TECHNICAL DIAGNOSIS</p><h2><?=e($diag['label'])?></h2><p><?=e($diag['detail'])?></p></div><span class="diagnosis-state"><?=e(strtoupper($diag['severity']??'warning'))?></span></section>
 
 <?php if(empty($result['deep_performed']) && empty($episode['has_file'])):?><section class="panel deep-search-cta"><h2>Need indexer-level reasons?</h2><p class="muted">Run Deep Search only when needed. It checks live Sonarr releases and rejection reasons without loading the entire response into memory.</p><a class="support-primary" href="/episode-diagnose.php?id=<?=$id?>&deep=1">Run Deep Search</a></section><?php endif;?>
 
@@ -39,7 +151,7 @@ $diag=$result['diagnosis']??['label'=>'Unknown','severity'=>'warning','detail'=>
 
 <?php if(!empty($result['queue'])):?><section class="panel"><h2>Download / import queue</h2><div class="release-list"><?php foreach($result['queue'] as $q):?><article class="release-row"><div><strong><?=e((string)$q['title'])?></strong><p class="meta"><?=e((string)$q['state'])?><?php if(!empty($q['download_client'])):?> · <?=e($q['download_client'])?><?php endif;?></p></div><div class="release-status"><?=e((string)$q['state'])?></div><?php if(!empty($q['messages'])):?><div class="release-reasons"><?php foreach($q['messages'] as $m):?><span><?=e($m)?></span><?php endforeach;?></div><?php endif;?></article><?php endforeach;?></div></section><?php endif;?>
 
-<?php if(!empty($result['categories'])):?><section class="panel"><h2>Detected reasons</h2><div class="reason-list"><?php foreach($result['categories'] as $name=>$messages):?><div class="reason-card"><h3><?=e($name)?></h3><?php foreach($messages as $m):?><p><?=e($m)?></p><?php endforeach;?></div><?php endforeach;?></div></section><?php endif;?>
+<?php if(!empty($result['categories'])):?><section class="panel"><h2>Detected reasons</h2><div class="reason-list"><?php foreach($result['categories'] as $name=>$messages):?><div class="reason-card"><h3><?=e(sonarrDisplayCategory((string)$name))?></h3><?php foreach($messages as $m):?><p><?=e($m)?></p><?php endforeach;?></div><?php endforeach;?></div></section><?php endif;?>
 
 <?php if(!empty($result['history'])):?><section class="panel"><h2>Recent Sonarr history</h2><div class="history-list"><?php foreach(array_slice($result['history'],0,20) as $event):?><article class="history-row"><div class="history-type"><?=e($event['event_type']?:'event')?></div><div><strong><?=e($event['source_title']?:ucfirst((string)$event['event_type']))?></strong><p class="meta"><?=e(epDate($event['date']??null))?><?php if($event['quality']):?> · <?=e($event['quality'])?><?php endif;?><?php if($event['languages']):?> · <?=e($event['languages'])?><?php endif;?></p><?php if($event['message']):?><p><?=e((string)$event['message'])?></p><?php endif;?></div></article><?php endforeach;?></div></section><?php endif;?>
 
