@@ -17,8 +17,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $stmt->execute(['public_local_root', rtrim($localRoot, "/\\")]);
             $stmt->execute(['public_base_url', rtrim($baseUrl, '/')]);
             $message = 'Public/VOD link settings saved.';
-        } elseif
-        if ($action === 'add') {
+        } elseif ($action === 'add') {
             $name = trim($_POST['name'] ?? '');
             $type = $_POST['type'] ?? '';
             $url = trim($_POST['url'] ?? '');
