@@ -56,9 +56,9 @@ if ($type === 'movies') {
         COUNT(*) total,
         SUM(CASE WHEN s.episode_file_count < s.episode_count THEN 1 ELSE 0 END) missing,
         SUM(CASE WHEN s.episode_count > 0 AND s.episode_file_count >= s.episode_count THEN 1 ELSE 0 END) complete,
-        SUM(CASE WHEN EXISTS(SELECT 1 FROM episodes e WHERE e.series_id=s.id AND e.has_file=0 AND e.monitored=1 AND e.air_date_utc IS NOT NULL AND datetime(e.air_date_utc)<=datetime('now')) THEN 1 ELSE 0 END) airedmissing,
-        SUM(CASE WHEN EXISTS(SELECT 1 FROM episodes e WHERE e.series_id=s.id AND e.has_file=0 AND e.air_date_utc IS NOT NULL AND datetime(e.air_date_utc)>datetime('now')) THEN 1 ELSE 0 END) future,
-        SUM(CASE WHEN EXISTS(SELECT 1 FROM episodes e WHERE e.series_id=s.id AND e.has_file=1 AND (e.audio_languages IS NULL OR TRIM(e.audio_languages)='')) THEN 1 ELSE 0 END) noaudio,
+        SUM(CASE WHEN s.aired_missing_count>0 THEN 1 ELSE 0 END) airedmissing,
+        SUM(CASE WHEN s.future_missing_count>0 THEN 1 ELSE 0 END) future,
+        SUM(CASE WHEN s.missing_audio_count>0 THEN 1 ELSE 0 END) noaudio,
         SUM(CASE WHEN s.monitored=0 THEN 1 ELSE 0 END) unmonitored,
         SUM(CASE WHEN s.monitored=1 THEN 1 ELSE 0 END) monitored
         FROM series s JOIN instances i ON i.id=s.instance_id WHERE i.enabled=1";
@@ -71,11 +71,11 @@ if ($type === 'movies') {
     if ($instanceId > 0) { $sql .= ' AND s.instance_id=?'; $params[] = $instanceId; }
     if ($q !== '') { $sql .= ' AND s.title LIKE ?'; $params[] = '%' . $q . '%'; }
 
-    if ($filter === 'airedmissing') $sql .= " AND EXISTS(SELECT 1 FROM episodes e WHERE e.series_id=s.id AND e.has_file=0 AND e.monitored=1 AND e.air_date_utc IS NOT NULL AND datetime(e.air_date_utc)<=datetime('now'))";
+    if ($filter === 'airedmissing') $sql .= ' AND s.aired_missing_count>0';
     elseif ($filter === 'missing') $sql .= ' AND s.episode_file_count < s.episode_count';
     elseif ($filter === 'complete') $sql .= ' AND s.episode_count > 0 AND s.episode_file_count >= s.episode_count';
-    elseif ($filter === 'future') $sql .= " AND EXISTS(SELECT 1 FROM episodes e WHERE e.series_id=s.id AND e.has_file=0 AND e.air_date_utc IS NOT NULL AND datetime(e.air_date_utc)>datetime('now'))";
-    elseif ($filter === 'noaudio') $sql .= " AND EXISTS(SELECT 1 FROM episodes e WHERE e.series_id=s.id AND e.has_file=1 AND (e.audio_languages IS NULL OR TRIM(e.audio_languages)=''))";
+    elseif ($filter === 'future') $sql .= ' AND s.future_missing_count>0';
+    elseif ($filter === 'noaudio') $sql .= ' AND s.missing_audio_count>0';
     elseif ($filter === 'unmonitored') $sql .= ' AND s.monitored=0';
     elseif ($filter === 'monitored') $sql .= ' AND s.monitored=1';
 
