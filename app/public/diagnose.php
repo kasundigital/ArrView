@@ -49,10 +49,11 @@ if (!empty($movie['has_file'])) {
 </head>
 <body>
 <header class="topbar">
-  <a class="brand" href="/">ArrView</a>
+  <a class="brand" href="/">ArrView <small class="version-chip">v<?=e(ARRVIEW_VERSION)?></small></a>
   <nav>
     <a href="/?type=movies">Movies</a>
     <a href="/?type=series">Series</a>
+    <a href="/support.php">Support</a>
     <?php if($currentUser['role']==='admin'):?><a href="/admin.php">Admin</a><?php endif;?>
     <span class="user-chip"><?=e($currentUser['username'])?></span>
     <a href="/logout.php">Logout</a>
@@ -66,7 +67,7 @@ if (!empty($movie['has_file'])) {
     <h1><?=e($movie['title'])?></h1>
     <p class="meta"><?=e((string)$movie['year'])?> · <?=e($movie['instance_name'])?></p>
   </div>
-  <a class="button-link" href="/?type=movies">← Back to Movies</a>
+  <div class="detail-actions"><a class="button-link" href="/movie.php?id=<?=$id?>">Movie details</a><a class="button-link" href="/?type=movies">← Back to Movies</a></div>
 </section>
 
 <div class="notice info">Live check: ArrView reads Radarr movie state, queue, recent history, blocklist, and performs an indexer release search. It does not grab or modify releases.</div>
@@ -186,6 +187,6 @@ if (!empty($movie['has_file'])) {
 
 <?php endif;?>
 </main>
-<footer>ArrView · Radarr missing movie diagnostics</footer>
+<footer>ArrView v<?=e(ARRVIEW_VERSION)?> · Radarr missing movie diagnostics</footer>
 </body>
 </html>
