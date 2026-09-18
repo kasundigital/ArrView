@@ -1,13 +1,13 @@
 services:
   arrview:
-    build: .
+    image: ghcr.io/kasundigital/arrview:latest
     container_name: arrview
     restart: unless-stopped
     ports:
-      - "3223:8080"
+      - "${ARRVIEW_PORT:-3223}:8080"
     environment:
-      - TZ=${TZ:-Asia/Colombo}
-      - ARRVIEW_DATA=/app/data
+      TZ: ${TZ:-Asia/Colombo}
+      ARRVIEW_DATA: /app/data
     volumes:
       - arrview-data:/app/data
 
