@@ -213,14 +213,22 @@ SQL;
     private function audioLanguages(?array $file): ?string
     {
         if(!$file)return null;
-        $value=($file['mediaInfo']??[])['audioLanguages']??($file['mediaInfo']??[])['audioLanguage']??null;
+
+        $value = $file['languages']
+            ?? (($file['mediaInfo']??[])['audioLanguages'] ?? (($file['mediaInfo']??[])['audioLanguage'] ?? null));
+
         if(is_array($value)){
             $parts=[];
-            foreach($value as $language)$parts[]=is_array($language)?($language['name']??$language['englishName']??$language['iso6391']??''):(string)$language;
-            $parts=array_values(array_filter(array_unique($parts)));
+            foreach($value as $language){
+                $parts[]=is_array($language)
+                    ? ($language['name']??$language['englishName']??$language['iso6391']??'')
+                    : (string)$language;
+            }
+            $parts=array_values(array_filter(array_unique(array_map('trim',$parts))));
             return $parts?implode(', ',$parts):null;
         }
-        return $value?(string)$value:null;
+
+        return $value ? trim((string)$value) : null;
     }
 
     private function removeStale(string $table,int $instanceId,array $seen):void
