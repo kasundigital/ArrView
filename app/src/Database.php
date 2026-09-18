@@ -75,6 +75,7 @@ CREATE TABLE IF NOT EXISTS series (
     monitored INTEGER NOT NULL DEFAULT 0,
     episode_count INTEGER NOT NULL DEFAULT 0,
     episode_file_count INTEGER NOT NULL DEFAULT 0,
+    audio_languages TEXT NULL,
     path TEXT NULL,
     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     UNIQUE(instance_id, remote_id),
@@ -102,5 +103,18 @@ CREATE INDEX IF NOT EXISTS idx_movies_instance ON movies(instance_id);
 CREATE INDEX IF NOT EXISTS idx_series_instance ON series(instance_id);
 CREATE INDEX IF NOT EXISTS idx_sync_jobs_instance ON sync_jobs(instance_id, id DESC);
 SQL);
+
+        // Lightweight migration for installations created before series audio tracking.
+        $seriesColumns = $this->pdo->query('PRAGMA table_info(series)')->fetchAll();
+        $hasAudioLanguages = false;
+        foreach ($seriesColumns as $column) {
+            if (($column['name'] ?? '') === 'audio_languages') {
+                $hasAudioLanguages = true;
+                break;
+            }
+        }
+        if (!$hasAudioLanguages) {
+            $this->pdo->exec('ALTER TABLE series ADD COLUMN audio_languages TEXT NULL');
+        }
     }
 }
