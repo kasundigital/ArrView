@@ -101,7 +101,7 @@ $history = $details['history'] ?? [];
             <?php if(!empty($movie['overview'])):?><p class="movie-overview"><?=e($movie['overview'])?></p><?php endif;?>
             <div class="detail-actions">
                 <?php if(empty($movie['has_file'])):?><a class="table-action important" href="/diagnose.php?id=<?=$id?>">Why missing?</a><?php endif;?>
-                <a class="table-action" href="<?=e(rtrim($instance['url'],'/').'/movie/'.$movie['id'])?>" target="_blank" rel="noopener noreferrer">Open in Radarr ↗</a>
+                <?php if(!empty($movie['title_slug'])):?><a class="table-action" href="<?=e(rtrim($instance['url'],'/').'/movie/'.$movie['title_slug'])?>" target="_blank" rel="noopener noreferrer">Open in Radarr ↗</a><?php else:?><a class="table-action" href="<?=e(rtrim($instance['url'],'/'))?>" target="_blank" rel="noopener noreferrer">Open Radarr ↗</a><?php endif;?>
             </div>
         </div>
     </section>
