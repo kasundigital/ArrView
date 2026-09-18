@@ -87,6 +87,44 @@ CREATE TABLE IF NOT EXISTS app_settings (
     setting_value TEXT NULL
 );
 
+CREATE TABLE IF NOT EXISTS episodes (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    instance_id INTEGER NOT NULL,
+    series_id INTEGER NOT NULL,
+    series_remote_id INTEGER NOT NULL,
+    remote_id INTEGER NOT NULL,
+    season_number INTEGER NOT NULL DEFAULT 0,
+    episode_number INTEGER NOT NULL DEFAULT 0,
+    absolute_episode_number INTEGER NULL,
+    title TEXT NOT NULL,
+    air_date_utc TEXT NULL,
+    monitored INTEGER NOT NULL DEFAULT 0,
+    has_file INTEGER NOT NULL DEFAULT 0,
+    episode_file_id INTEGER NULL,
+    relative_path TEXT NULL,
+    file_path TEXT NULL,
+    file_size INTEGER NULL,
+    quality TEXT NULL,
+    audio_languages TEXT NULL,
+    date_added TEXT NULL,
+    release_group TEXT NULL,
+    scene_name TEXT NULL,
+    video_codec TEXT NULL,
+    video_resolution TEXT NULL,
+    audio_codec TEXT NULL,
+    audio_channels REAL NULL,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(instance_id, remote_id),
+    FOREIGN KEY(instance_id) REFERENCES instances(id) ON DELETE CASCADE,
+    FOREIGN KEY(series_id) REFERENCES series(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS diagnostic_cache (
+    cache_key TEXT PRIMARY KEY,
+    payload_json TEXT NOT NULL,
+    checked_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
 CREATE TABLE IF NOT EXISTS sync_jobs (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     instance_id INTEGER NOT NULL,
@@ -107,6 +145,10 @@ CREATE INDEX IF NOT EXISTS idx_series_title ON series(title);
 CREATE INDEX IF NOT EXISTS idx_movies_instance ON movies(instance_id);
 CREATE INDEX IF NOT EXISTS idx_series_instance ON series(instance_id);
 CREATE INDEX IF NOT EXISTS idx_sync_jobs_instance ON sync_jobs(instance_id, id DESC);
+CREATE INDEX IF NOT EXISTS idx_episodes_series ON episodes(series_id, season_number, episode_number);
+CREATE INDEX IF NOT EXISTS idx_episodes_instance_remote ON episodes(instance_id, remote_id);
+CREATE INDEX IF NOT EXISTS idx_episodes_airdate ON episodes(air_date_utc);
+CREATE INDEX IF NOT EXISTS idx_episodes_missing ON episodes(has_file, monitored);
 SQL);
 
         // Lightweight migration for installations created before series audio tracking.

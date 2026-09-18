@@ -3,6 +3,7 @@ require_once dirname(__DIR__) . '/bootstrap.php';
 $currentUser = $auth->requireLogin();
 
 $id = (int)($_GET['id'] ?? 0);
+$deep = ($_GET['deep'] ?? '') === '1';
 $stmt = $pdo->prepare('SELECT m.*, i.name instance_name, i.type instance_type, i.url, i.api_key, i.enabled FROM movies m JOIN instances i ON i.id=m.instance_id WHERE m.id=?');
 $stmt->execute([$id]);
 $movie = $stmt->fetch();
@@ -33,7 +34,7 @@ if (!empty($movie['has_file'])) {
             'url'=>$movie['url'],
             'api_key'=>$movie['api_key'],
             'enabled'=>$movie['enabled'],
-        ], (int)$movie['remote_id']);
+        ], (int)$movie['remote_id'], $deep);
     } catch (Throwable $e) {
         $error = $e->getMessage();
     }
@@ -70,7 +71,7 @@ if (!empty($movie['has_file'])) {
   <div class="detail-actions"><a class="button-link" href="/movie.php?id=<?=$id?>">Movie details</a><a class="button-link" href="/?type=movies">← Back to Movies</a></div>
 </section>
 
-<div class="notice info">Live check: ArrView reads Radarr movie state, queue, recent history, blocklist, and performs an indexer release search. It does not grab or modify releases.</div>
+<div class="notice info"><?=$deep?'Deep Search is querying enabled Radarr indexers. ArrView does not grab or modify releases.':'Light check reads Radarr state, queue, history and blocklist only. Indexers are not searched unless you choose Deep Search.'?></div>
 
 <?php if($error):?>
   <div class="notice error"><strong>Diagnostic failed:</strong> <?=e($error)?></div>
@@ -85,6 +86,14 @@ if (!empty($movie['has_file'])) {
   </div>
   <span class="diagnosis-state"><?=e(strtoupper($diag['severity'] ?? 'warning'))?></span>
 </section>
+
+<?php if(empty($result['deep_performed']) && empty($movie['has_file'])):?>
+<section class="panel deep-search-cta">
+  <h2>Need indexer-level reasons?</h2>
+  <p class="muted">Run Deep Search only when needed. Results are streamed and capped to protect ArrView from huge Radarr release responses.</p>
+  <a class="support-primary" href="/diagnose.php?id=<?=$id?>&deep=1">Run Deep Search</a>
+</section>
+<?php endif;?>
 
 <?php if(!empty($result['movie'])):?>
 <section class="panel">
@@ -157,6 +166,7 @@ if (!empty($movie['has_file'])) {
 </section>
 <?php endif;?>
 
+<?php if(!empty($result['deep_performed'])):?>
 <section class="panel">
   <div class="panel-heading-inline">
     <h2>Release search results</h2>
@@ -184,6 +194,7 @@ if (!empty($movie['has_file'])) {
     </div>
   <?php endif;?>
 </section>
+<?php endif;?>
 
 <?php endif;?>
 </main>

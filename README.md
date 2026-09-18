@@ -7,7 +7,7 @@
 <p align="center">
   <a href="https://github.com/kasundigital/ArrView/stargazers"><img alt="GitHub Stars" src="https://img.shields.io/github/stars/kasundigital/ArrView?style=for-the-badge"></a>
   <a href="https://github.com/kasundigital/ArrView/pkgs/container/arrview"><img alt="GHCR" src="https://img.shields.io/badge/GHCR-arrview-blue?style=for-the-badge&logo=docker"></a>
-  <a href="https://github.com/kasundigital/ArrView"><img alt="Version" src="https://img.shields.io/badge/version-v0.6.0-7c9cff?style=for-the-badge"></a>
+  <a href="https://github.com/kasundigital/ArrView"><img alt="Version" src="https://img.shields.io/badge/version-v0.8.0-7c9cff?style=for-the-badge"></a>
   <a href="https://buymeacoffee.com/kasundigital"><img alt="Buy Me a Coffee" src="https://img.shields.io/badge/Buy%20Me%20a%20Coffee-Support%20ArrView-FFDD00?style=for-the-badge&logo=buymeacoffee&logoColor=000000"></a>
 </p>
 
@@ -151,6 +151,30 @@ Use more than one:
 - Sonarr
 
 You can also filter the library by a specific instance.
+
+---
+
+## 📺 Sonarr Season & Episode View
+
+ArrView now caches Sonarr episodes locally during sync, so normal browsing does not continuously query Sonarr.
+
+- Expand a series into seasons
+- Expand seasons into episode tables
+- Episode file status
+- Aired vs future episode awareness
+- Per-episode audio language
+- Quality and file size
+- File-added date
+- File path and release metadata
+- Public/VOD links for episode files
+- Episode-level **Why Missing?** diagnostics
+- **Aired Missing** filter to avoid treating future episodes as failures
+
+## 🧠 Safer diagnostics
+
+Normal diagnostic pages perform a lightweight state/queue/history check first.
+
+A separate **Deep Search** button performs live indexer searching only when needed. Release responses are streamed and displayed with capped results to avoid the large-memory failures that can happen with huge Radarr/Sonarr release responses.
 
 ---
 

@@ -25,3 +25,10 @@ function redirect(string $url): never
     header('Location: ' . $url);
     exit;
 }
+
+
+function csrf_field(): string
+{
+    global $auth;
+    return '<input type="hidden" name="csrf_token" value="' . e($auth->csrfToken()) . '">';
+}

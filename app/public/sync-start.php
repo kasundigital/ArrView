@@ -9,6 +9,8 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
     exit;
 }
 
+try { $auth->requireCsrf($_POST['csrf_token'] ?? null); } catch (Throwable $e) { http_response_code(403); echo json_encode(['ok'=>false,'message'=>$e->getMessage()]); exit; }
+
 $instanceId = (int)($_POST['instance_id'] ?? 0);
 $stmt = $pdo->prepare('SELECT * FROM instances WHERE id=?');
 $stmt->execute([$instanceId]);
