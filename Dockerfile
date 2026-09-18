@@ -6,7 +6,10 @@ RUN apk add --no-cache curl-dev sqlite-dev \
 
 WORKDIR /app
 COPY app /app
-RUN mkdir -p /app/data && chown -R www-data:www-data /app/data
+
+RUN find /app -name '*.php' -print0 | xargs -0 -n1 php -l \
+    && mkdir -p /app/data \
+    && chown -R www-data:www-data /app/data
 
 EXPOSE 8080
 
