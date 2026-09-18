@@ -86,6 +86,7 @@ final class ArrService
         return [
             'movie' => [
                 'id' => $movie['id'] ?? $movieId,
+                'title_slug' => $movie['titleSlug'] ?? null,
                 'title' => $movie['title'] ?? 'Unknown',
                 'original_title' => $movie['originalTitle'] ?? null,
                 'year' => $movie['year'] ?? null,
