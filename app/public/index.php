@@ -4,92 +4,222 @@ $currentUser = $auth->requireLogin();
 
 $type = $_GET['type'] ?? null;
 $q = trim($_GET['q'] ?? '');
-$view = $_GET['view'] ?? 'list';
-if (!in_array($view, ['list','summary'], true)) $view = 'list';
+$filter = $_GET['filter'] ?? 'all';
+$instanceId = (int)($_GET['instance'] ?? 0);
+
+$validFilters = $type === 'series'
+    ? ['all','missing','complete','noaudio','monitored']
+    : ['all','missing','available','noaudio','monitored'];
+if (!in_array($filter, $validFilters, true)) $filter = 'all';
 
 $movieCount = (int)$pdo->query('SELECT COUNT(*) FROM movies')->fetchColumn();
 $seriesCount = (int)$pdo->query('SELECT COUNT(*) FROM series')->fetchColumn();
 $instanceCount = (int)$pdo->query('SELECT COUNT(*) FROM instances WHERE enabled=1')->fetchColumn();
 
+$instances = [];
+if ($type === 'movies' || $type === 'series') {
+    $instanceType = $type === 'movies' ? 'radarr' : 'sonarr';
+    $stmt = $pdo->prepare('SELECT id,name FROM instances WHERE enabled=1 AND type=? ORDER BY name COLLATE NOCASE');
+    $stmt->execute([$instanceType]);
+    $instances = $stmt->fetchAll();
+}
+
 $items = [];
-$summary = [];
-$qualityBreakdown = [];
-$languageBreakdown = [];
+$filterCounts = [];
 
 if ($type === 'movies') {
-    if ($view === 'summary') {
-        $summary = $pdo->query("SELECT COUNT(*) total, SUM(CASE WHEN m.has_file=1 THEN 1 ELSE 0 END) available, SUM(CASE WHEN m.has_file=0 THEN 1 ELSE 0 END) missing, SUM(CASE WHEN m.monitored=1 THEN 1 ELSE 0 END) monitored, COALESCE(SUM(m.file_size),0) total_size FROM movies m JOIN instances i ON i.id=m.instance_id WHERE i.enabled=1")->fetch() ?: [];
-        $qualityBreakdown = $pdo->query("SELECT COALESCE(NULLIF(TRIM(m.quality),''),'Unknown') label, COUNT(*) count FROM movies m JOIN instances i ON i.id=m.instance_id WHERE i.enabled=1 GROUP BY label ORDER BY count DESC, label COLLATE NOCASE LIMIT 10")->fetchAll();
-        $languageBreakdown = $pdo->query("SELECT COALESCE(NULLIF(TRIM(m.audio_languages),''),'Unknown') label, COUNT(*) count FROM movies m JOIN instances i ON i.id=m.instance_id WHERE i.enabled=1 GROUP BY label ORDER BY count DESC, label COLLATE NOCASE LIMIT 10")->fetchAll();
-    } else {
-        $sql = 'SELECT m.*, i.name instance_name FROM movies m JOIN instances i ON i.id=m.instance_id WHERE i.enabled=1';
-        $params = [];
-        if ($q !== '') { $sql .= ' AND m.title LIKE ?'; $params[] = '%' . $q . '%'; }
-        $sql .= ' ORDER BY m.title COLLATE NOCASE LIMIT 500';
-        $stmt = $pdo->prepare($sql); $stmt->execute($params); $items = $stmt->fetchAll();
-    }
+    $countSql = "SELECT
+        COUNT(*) total,
+        SUM(CASE WHEN m.has_file=0 THEN 1 ELSE 0 END) missing,
+        SUM(CASE WHEN m.has_file=1 THEN 1 ELSE 0 END) available,
+        SUM(CASE WHEN m.has_file=1 AND (m.audio_languages IS NULL OR TRIM(m.audio_languages)='') THEN 1 ELSE 0 END) noaudio,
+        SUM(CASE WHEN m.monitored=1 THEN 1 ELSE 0 END) monitored
+        FROM movies m JOIN instances i ON i.id=m.instance_id WHERE i.enabled=1";
+    $countParams = [];
+    if ($instanceId > 0) { $countSql .= ' AND m.instance_id=?'; $countParams[] = $instanceId; }
+    $stmt = $pdo->prepare($countSql); $stmt->execute($countParams); $filterCounts = $stmt->fetch() ?: [];
+
+    $sql = 'SELECT m.*, i.name instance_name FROM movies m JOIN instances i ON i.id=m.instance_id WHERE i.enabled=1';
+    $params = [];
+    if ($instanceId > 0) { $sql .= ' AND m.instance_id=?'; $params[] = $instanceId; }
+    if ($q !== '') { $sql .= ' AND m.title LIKE ?'; $params[] = '%' . $q . '%'; }
+
+    if ($filter === 'missing') $sql .= ' AND m.has_file=0';
+    elseif ($filter === 'available') $sql .= ' AND m.has_file=1';
+    elseif ($filter === 'noaudio') $sql .= " AND m.has_file=1 AND (m.audio_languages IS NULL OR TRIM(m.audio_languages)='')";
+    elseif ($filter === 'monitored') $sql .= ' AND m.monitored=1';
+
+    $sql .= ' ORDER BY m.title COLLATE NOCASE LIMIT 1000';
+    $stmt = $pdo->prepare($sql); $stmt->execute($params); $items = $stmt->fetchAll();
 } elseif ($type === 'series') {
-    if ($view === 'summary') {
-        $summary = $pdo->query("SELECT COUNT(*) total, SUM(CASE WHEN s.monitored=1 THEN 1 ELSE 0 END) monitored, COALESCE(SUM(s.episode_count),0) episodes, COALESCE(SUM(s.episode_file_count),0) files FROM series s JOIN instances i ON i.id=s.instance_id WHERE i.enabled=1")->fetch() ?: [];
-    } else {
-        $sql = 'SELECT s.*, i.name instance_name FROM series s JOIN instances i ON i.id=s.instance_id WHERE i.enabled=1';
-        $params = [];
-        if ($q !== '') { $sql .= ' AND s.title LIKE ?'; $params[] = '%' . $q . '%'; }
-        $sql .= ' ORDER BY s.title COLLATE NOCASE LIMIT 500';
-        $stmt = $pdo->prepare($sql); $stmt->execute($params); $items = $stmt->fetchAll();
-    }
+    $countSql = "SELECT
+        COUNT(*) total,
+        SUM(CASE WHEN s.episode_file_count < s.episode_count THEN 1 ELSE 0 END) missing,
+        SUM(CASE WHEN s.episode_count > 0 AND s.episode_file_count >= s.episode_count THEN 1 ELSE 0 END) complete,
+        SUM(CASE WHEN s.episode_file_count > 0 AND (s.audio_languages IS NULL OR TRIM(s.audio_languages)='') THEN 1 ELSE 0 END) noaudio,
+        SUM(CASE WHEN s.monitored=1 THEN 1 ELSE 0 END) monitored
+        FROM series s JOIN instances i ON i.id=s.instance_id WHERE i.enabled=1";
+    $countParams = [];
+    if ($instanceId > 0) { $countSql .= ' AND s.instance_id=?'; $countParams[] = $instanceId; }
+    $stmt = $pdo->prepare($countSql); $stmt->execute($countParams); $filterCounts = $stmt->fetch() ?: [];
+
+    $sql = 'SELECT s.*, i.name instance_name FROM series s JOIN instances i ON i.id=s.instance_id WHERE i.enabled=1';
+    $params = [];
+    if ($instanceId > 0) { $sql .= ' AND s.instance_id=?'; $params[] = $instanceId; }
+    if ($q !== '') { $sql .= ' AND s.title LIKE ?'; $params[] = '%' . $q . '%'; }
+
+    if ($filter === 'missing') $sql .= ' AND s.episode_file_count < s.episode_count';
+    elseif ($filter === 'complete') $sql .= ' AND s.episode_count > 0 AND s.episode_file_count >= s.episode_count';
+    elseif ($filter === 'noaudio') $sql .= " AND s.episode_file_count > 0 AND (s.audio_languages IS NULL OR TRIM(s.audio_languages)='')";
+    elseif ($filter === 'monitored') $sql .= ' AND s.monitored=1';
+
+    $sql .= ' ORDER BY s.title COLLATE NOCASE LIMIT 1000';
+    $stmt = $pdo->prepare($sql); $stmt->execute($params); $items = $stmt->fetchAll();
 }
 
-function bytesLabel(int|float $bytes): string {
-    if ($bytes <= 0) return '0 GB';
-    $units = ['B','KB','MB','GB','TB','PB'];
-    $i = 0; $value = (float)$bytes;
-    while ($value >= 1024 && $i < count($units)-1) { $value /= 1024; $i++; }
-    return number_format($value, $i >= 3 ? 2 : 1) . ' ' . $units[$i];
+function filterUrl(string $type, string $filter, int $instanceId, string $q = ''): string
+{
+    $params = ['type'=>$type, 'filter'=>$filter];
+    if ($instanceId > 0) $params['instance'] = $instanceId;
+    if ($q !== '') $params['q'] = $q;
+    return '/?' . http_build_query($params);
 }
 ?>
-<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>ArrView <?=e(ARRVIEW_VERSION)?></title><link rel="stylesheet" href="/assets/style.css"><link rel="stylesheet" href="/assets/summary.css"></head><body>
-<header class="topbar"><a class="brand" href="/">ArrView <small class="version-chip">v<?=e(ARRVIEW_VERSION)?></small></a><nav><a href="/?type=movies">Movies</a><a href="/?type=series">Series</a><?php if($currentUser['role']==='admin'):?><a href="/admin.php">Admin</a><?php endif;?><span class="user-chip"><?=e($currentUser['username'])?></span><a href="/logout.php">Logout</a></nav></header>
-<main class="wrap">
-<?php if(!$type):?>
-<section class="hero"><p class="eyebrow">RADARR + SONARR LIBRARY VIEW</p><h1>Your media. One clean view.</h1><p>Browse availability, quality, posters and language information across all configured instances.</p></section>
-<section class="chooser"><a class="choice" href="/?type=movies"><div class="choice-icon">🎬</div><div><span>Radarr</span><h2>Movies</h2><p><?=$movieCount?> indexed movies</p></div></a><a class="choice" href="/?type=series"><div class="choice-icon">📺</div><div><span>Sonarr</span><h2>TV Series</h2><p><?=$seriesCount?> indexed series</p></div></a></section><p class="muted center"><?=$instanceCount?> enabled instance<?=$instanceCount===1?'':'s'?></p>
-<?php else:?>
-<section class="catalog-head">
-  <div><p class="eyebrow"><?=$type==='movies'?'RADARR':'SONARR'?></p><h1><?=$type==='movies'?'Movies':'TV Series'?></h1></div>
-  <?php if($view==='list'):?><form class="search" method="get"><input type="hidden" name="type" value="<?=e($type)?>"><input type="hidden" name="view" value="list"><input id="searchInput" type="search" name="q" value="<?=e($q)?>" placeholder="Search <?=$type==='movies'?'movies':'series'?>..." autocomplete="off"></form><?php endif;?>
-</section>
-<div class="view-switch" role="navigation" aria-label="Library view"><a class="<?=$view==='list'?'active':''?>" href="/?type=<?=e($type)?>&view=list">☷ List View</a><a class="<?=$view==='summary'?'active':''?>" href="/?type=<?=e($type)?>&view=summary">▦ Summary</a></div>
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>ArrView <?=e(ARRVIEW_VERSION)?></title>
+<link rel="stylesheet" href="/assets/style.css">
+</head>
+<body>
+<header class="topbar">
+    <a class="brand" href="/">ArrView <small class="version-chip">v<?=e(ARRVIEW_VERSION)?></small></a>
+    <nav>
+        <a href="/?type=movies" class="<?=$type==='movies'?'active':''?>">Movies</a>
+        <a href="/?type=series" class="<?=$type==='series'?'active':''?>">Series</a>
+        <?php if($currentUser['role']==='admin'):?><a href="/admin.php">Admin</a><?php endif;?>
+        <span class="user-chip"><?=e($currentUser['username'])?></span>
+        <a href="/logout.php">Logout</a>
+    </nav>
+</header>
 
-<?php if($view==='summary'):?>
-  <?php if($type==='movies'):?>
-    <?php $total=(int)($summary['total']??0); $available=(int)($summary['available']??0); $missing=(int)($summary['missing']??0); $monitored=(int)($summary['monitored']??0); $pct=$total?round(($available/$total)*100,1):0; ?>
-    <section class="summary-grid">
-      <div class="summary-card"><span>Total Movies</span><strong><?=number_format($total)?></strong></div>
-      <div class="summary-card"><span>Available</span><strong><?=number_format($available)?></strong><small><?=$pct?>%</small></div>
-      <div class="summary-card"><span>Missing</span><strong><?=number_format($missing)?></strong><small><?=$total?round(($missing/$total)*100,1):0?>%</small></div>
-      <div class="summary-card"><span>Monitored</span><strong><?=number_format($monitored)?></strong></div>
-      <div class="summary-card"><span>Library Size</span><strong><?=e(bytesLabel((int)($summary['total_size']??0)))?></strong></div>
+<main class="wrap compact-library">
+<?php if(!$type):?>
+    <section class="hero">
+        <p class="eyebrow">RADARR + SONARR LIBRARY VIEW</p>
+        <h1>Find what is missing.</h1>
+        <p>Compact library monitoring focused on file availability, audio language and missing-download diagnostics.</p>
     </section>
-    <section class="panel summary-panel"><h2>Availability</h2><div class="summary-progress"><div style="width:<?=$pct?>%"></div></div><p class="meta"><?=number_format($available)?> of <?=number_format($total)?> movies currently have files.</p></section>
-    <section class="summary-columns">
-      <div class="panel"><h2>Top Qualities</h2><?php if(!$qualityBreakdown):?><p class="muted">No quality data yet.</p><?php else:?><div class="stat-list"><?php foreach($qualityBreakdown as $row):?><div><span><?=e($row['label'])?></span><strong><?=number_format((int)$row['count'])?></strong></div><?php endforeach;?></div><?php endif;?></div>
-      <div class="panel"><h2>Audio Languages</h2><?php if(!$languageBreakdown):?><p class="muted">No language data yet.</p><?php else:?><div class="stat-list"><?php foreach($languageBreakdown as $row):?><div><span><?=e($row['label'])?></span><strong><?=number_format((int)$row['count'])?></strong></div><?php endforeach;?></div><?php endif;?></div>
+    <section class="chooser">
+        <a class="choice" href="/?type=movies"><div class="choice-icon">🎬</div><div><span>Radarr</span><h2>Movies</h2><p><?=$movieCount?> indexed movies</p></div></a>
+        <a class="choice" href="/?type=series"><div class="choice-icon">📺</div><div><span>Sonarr</span><h2>TV Series</h2><p><?=$seriesCount?> indexed series</p></div></a>
     </section>
-  <?php else:?>
-    <?php $total=(int)($summary['total']??0); $episodes=(int)($summary['episodes']??0); $files=(int)($summary['files']??0); $monitored=(int)($summary['monitored']??0); $pct=$episodes?round(($files/$episodes)*100,1):0; ?>
-    <section class="summary-grid">
-      <div class="summary-card"><span>Total Series</span><strong><?=number_format($total)?></strong></div>
-      <div class="summary-card"><span>Monitored</span><strong><?=number_format($monitored)?></strong></div>
-      <div class="summary-card"><span>Total Episodes</span><strong><?=number_format($episodes)?></strong></div>
-      <div class="summary-card"><span>Available Episodes</span><strong><?=number_format($files)?></strong><small><?=$pct?>%</small></div>
-      <div class="summary-card"><span>Missing Episodes</span><strong><?=number_format(max(0,$episodes-$files))?></strong></div>
-    </section>
-    <section class="panel summary-panel"><h2>Episode Availability</h2><div class="summary-progress"><div style="width:<?=$pct?>%"></div></div><p class="meta"><?=number_format($files)?> of <?=number_format($episodes)?> episodes currently have files.</p></section>
-  <?php endif;?>
+    <p class="muted center"><?=$instanceCount?> enabled instance<?=$instanceCount===1?'':'s'?></p>
 <?php else:?>
-  <?php if(!$items):?><div class="empty"><h2>No media found</h2><p><?php if($currentUser['role']==='admin'):?>Add an instance in Admin and run a sync.<?php else:?>No indexed media is available yet.<?php endif;?></p></div><?php else:?><section class="grid" id="mediaGrid"><?php foreach($items as $item):?><article class="card" data-title="<?=e(strtolower($item['title']))?>"><div class="poster"><?php if(!empty($item['poster_url'])):?><img src="<?=e($item['poster_url'])?>" alt="<?=e($item['title'])?>" loading="lazy"><?php else:?><div class="poster-fallback">No Poster</div><?php endif;?><?php if($type==='movies'):?><span class="badge <?=$item['has_file']?'ok':'missing'?>"><?=$item['has_file']?'Available':'Missing'?></span><?php endif;?></div><div class="card-body"><h3><?=e($item['title'])?></h3><p class="meta"><?=e((string)$item['year'])?> · <?=e($item['instance_name'])?></p><?php if($type==='movies'):?><div class="chips"><?php if($item['quality']):?><span><?=e($item['quality'])?></span><?php endif;?><?php if($item['audio_languages']):?><span>🔊 <?=e($item['audio_languages'])?></span><?php endif;?></div><?php if(!$item['has_file']):?><a class="why-link" href="/diagnose.php?id=<?=(int)$item['id']?>">Why missing?</a><?php endif;?><?php else:?><p class="meta"><?=(int)$item['episode_file_count']?> / <?=(int)$item['episode_count']?> episodes available</p><?php endif;?></div></article><?php endforeach;?></section><?php endif;?>
+    <section class="compact-head">
+        <div>
+            <p class="eyebrow"><?=$type==='movies'?'RADARR MOVIES':'SONARR SERIES'?></p>
+            <h1><?=$type==='movies'?'Movies':'TV Series'?></h1>
+        </div>
+        <div class="result-count"><?=number_format(count($items))?> shown</div>
+    </section>
+
+    <form class="library-toolbar" method="get">
+        <input type="hidden" name="type" value="<?=e($type)?>">
+        <input type="hidden" name="filter" value="<?=e($filter)?>">
+        <div class="toolbar-search">
+            <input type="search" name="q" value="<?=e($q)?>" placeholder="Search title..." autocomplete="off">
+        </div>
+        <select name="instance" onchange="this.form.submit()">
+            <option value="0">All instances</option>
+            <?php foreach($instances as $instance):?>
+                <option value="<?=(int)$instance['id']?>" <?=$instanceId===(int)$instance['id']?'selected':''?>><?=e($instance['name'])?></option>
+            <?php endforeach;?>
+        </select>
+        <button type="submit">Search</button>
+        <?php if($q!=='' || $instanceId>0):?><a class="toolbar-reset" href="/?type=<?=e($type)?>&filter=<?=e($filter)?>">Reset</a><?php endif;?>
+    </form>
+
+    <nav class="quick-filters" aria-label="Library filters">
+        <a class="<?=$filter==='all'?'active':''?>" href="<?=e(filterUrl($type,'all',$instanceId,$q))?>">All <span><?=number_format((int)($filterCounts['total']??0))?></span></a>
+        <a class="<?=$filter==='missing'?'active danger-filter':''?>" href="<?=e(filterUrl($type,'missing',$instanceId,$q))?>">Missing <span><?=number_format((int)($filterCounts['missing']??0))?></span></a>
+        <?php if($type==='movies'):?>
+            <a class="<?=$filter==='available'?'active':''?>" href="<?=e(filterUrl($type,'available',$instanceId,$q))?>">Available <span><?=number_format((int)($filterCounts['available']??0))?></span></a>
+        <?php else:?>
+            <a class="<?=$filter==='complete'?'active':''?>" href="<?=e(filterUrl($type,'complete',$instanceId,$q))?>">Complete <span><?=number_format((int)($filterCounts['complete']??0))?></span></a>
+        <?php endif;?>
+        <a class="<?=$filter==='noaudio'?'active warning-filter':''?>" href="<?=e(filterUrl($type,'noaudio',$instanceId,$q))?>">Missing Audio Info <span><?=number_format((int)($filterCounts['noaudio']??0))?></span></a>
+        <a class="<?=$filter==='monitored'?'active':''?>" href="<?=e(filterUrl($type,'monitored',$instanceId,$q))?>">Monitored <span><?=number_format((int)($filterCounts['monitored']??0))?></span></a>
+    </nav>
+
+    <?php if(!$items):?>
+        <div class="empty compact"><h2>No matching items</h2><p>Try another filter or run a fresh sync from Admin.</p></div>
+    <?php else:?>
+        <div class="media-table-wrap">
+            <table class="media-table">
+                <thead>
+                    <tr>
+                        <th>Title</th>
+                        <th>Year</th>
+                        <th>File Status</th>
+                        <th>Audio Language</th>
+                        <th><?=$type==='movies'?'Quality':'Episodes'?></th>
+                        <th>Instance</th>
+                        <th>Action</th>
+                    </tr>
+                </thead>
+                <tbody>
+                <?php foreach($items as $item):?>
+                    <?php
+                    if ($type === 'movies') {
+                        $isMissing = !(int)$item['has_file'];
+                        $statusText = $isMissing ? 'Missing' : 'Available';
+                        $statusClass = $isMissing ? 'status-missing' : 'status-ok';
+                        $detail = $item['quality'] ?: '—';
+                        $audio = $item['audio_languages'] ?: ($isMissing ? 'No file' : 'Unknown');
+                    } else {
+                        $episodes = (int)$item['episode_count'];
+                        $files = (int)$item['episode_file_count'];
+                        $isMissing = $files < $episodes;
+                        $statusText = $isMissing ? 'Missing episodes' : 'Complete';
+                        $statusClass = $isMissing ? 'status-missing' : 'status-ok';
+                        $detail = number_format($files) . ' / ' . number_format($episodes);
+                        $audio = $item['audio_languages'] ?: ($files > 0 ? 'Unknown' : 'No files');
+                    }
+                    ?>
+                    <tr class="<?=$isMissing?'row-missing':''?>">
+                        <td class="title-cell">
+                            <strong><?=e($item['title'])?></strong>
+                            <?php if(!(int)$item['monitored']):?><span class="row-note">Not monitored</span><?php endif;?>
+                        </td>
+                        <td><?=e((string)($item['year'] ?: '—'))?></td>
+                        <td><span class="table-status <?=$statusClass?>"><?=e($statusText)?></span></td>
+                        <td class="audio-cell">
+                            <span class="<?=($audio==='Unknown' || $audio==='No file' || $audio==='No files')?'audio-unknown':'audio-known'?>">🔊 <?=e($audio)?></span>
+                        </td>
+                        <td><?=e($detail)?></td>
+                        <td class="instance-cell"><?=e($item['instance_name'])?></td>
+                        <td class="action-cell">
+                            <?php if($type==='movies' && $isMissing):?>
+                                <a class="table-action" href="/diagnose.php?id=<?=(int)$item['id']?>">Why missing?</a>
+                            <?php elseif($type==='series' && $isMissing):?>
+                                <span class="muted">Missing <?=$episodes-$files?> ep.</span>
+                            <?php else:?>
+                                <span class="muted">—</span>
+                            <?php endif;?>
+                        </td>
+                    </tr>
+                <?php endforeach;?>
+                </tbody>
+            </table>
+        </div>
+        <?php if(count($items)>=1000):?><p class="muted table-limit-note">Showing first 1,000 results. Use search or filters to narrow the list.</p><?php endif;?>
+    <?php endif;?>
 <?php endif;?>
-<?php endif;?></main>
-<footer>ArrView v<?=e(ARRVIEW_VERSION)?> · Open source self-hosted media catalog</footer>
-<script>const input=document.getElementById('searchInput');if(input){input.addEventListener('input',()=>{const q=input.value.toLowerCase();document.querySelectorAll('.card').forEach(c=>c.style.display=c.dataset.title.includes(q)?'':'none')})}</script></body></html>
+</main>
+
+<footer>ArrView v<?=e(ARRVIEW_VERSION)?> · Audio & availability focused library monitor</footer>
+</body>
+</html>
