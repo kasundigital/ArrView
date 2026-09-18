@@ -1,0 +1,1 @@
+.env\napp/data/*\n!app/data/.gitkeep\n*.log\n.DS_Store\n
