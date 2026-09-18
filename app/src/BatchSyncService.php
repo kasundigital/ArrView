@@ -169,7 +169,18 @@ SQL;
                         $hasFile = !empty($episode['hasFile']) || $file !== null;
                         if ($hasFile) $actualFileCount++;
 
+                        $airDateUtc = $episode['airDateUtc'] ?? null;
+                        if (!$hasFile && $airDateUtc) {
+                            try {
+                                $aired = new DateTimeImmutable((string)$airDateUtc) <= new DateTimeImmutable('now', new DateTimeZone('UTC'));
+                                if ($aired && !empty($episode['monitored'])) $airedMissingCount++;
+                                elseif (!$aired) $futureMissingCount++;
+                            } catch (Throwable) {
+                            }
+                        }
+
                         $languageText = $this->audioLanguages($file);
+                        if ($hasFile && !$languageText) $missingAudioCount++;
                         if ($languageText) {
                             foreach (array_map('trim', explode(',', $languageText)) as $language) {
                                 if ($language !== '') $languages[$language] = true;
@@ -221,11 +232,14 @@ SQL;
                     $audioLanguages = $names ? implode(', ', $names) : null;
 
                     $updateSeries = $this->pdo->prepare(
-                        'UPDATE series SET audio_languages=?, episode_file_count=? WHERE id=?'
+                        'UPDATE series SET audio_languages=?, episode_file_count=?, aired_missing_count=?, future_missing_count=?, missing_audio_count=? WHERE id=?'
                     );
                     $updateSeries->execute([
                         $audioLanguages,
                         $episodes ? $actualFileCount : (int)($stats['episodeFileCount'] ?? 0),
+                        $airedMissingCount,
+                        $futureMissingCount,
+                        $missingAudioCount,
                         $seriesLocalId,
                     ]);
 
