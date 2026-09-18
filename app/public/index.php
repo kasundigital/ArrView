@@ -99,6 +99,7 @@ function filterUrl(string $type, string $filter, int $instanceId, string $q = ''
     <nav>
         <a href="/?type=movies" class="<?=$type==='movies'?'active':''?>">Movies</a>
         <a href="/?type=series" class="<?=$type==='series'?'active':''?>">Series</a>
+        <a href="/support.php">Support</a>
         <?php if($currentUser['role']==='admin'):?><a href="/admin.php">Admin</a><?php endif;?>
         <span class="user-chip"><?=e($currentUser['username'])?></span>
         <a href="/logout.php">Logout</a>
@@ -189,9 +190,9 @@ function filterUrl(string $type, string $filter, int $instanceId, string $q = ''
                         $audio = $item['audio_languages'] ?: ($files > 0 ? 'Unknown' : 'No files');
                     }
                     ?>
-                    <tr class="<?=$isMissing?'row-missing':''?>">
+                    <tr class="<?=$isMissing?'row-missing':''?> <?=$type==='movies'?'clickable-row':''?>" <?=$type==='movies'?'data-details-url="/movie.php?id='.(int)$item['id'].'"':''?>>
                         <td class="title-cell">
-                            <strong><?=e($item['title'])?></strong>
+                            <?php if($type==='movies'):?><a class="movie-title-link" href="/movie.php?id=<?=(int)$item['id']?>"><?=e($item['title'])?></a><?php else:?><strong><?=e($item['title'])?></strong><?php endif;?>
                             <?php if(!(int)$item['monitored']):?><span class="row-note">Not monitored</span><?php endif;?>
                         </td>
                         <td><?=e((string)($item['year'] ?: '—'))?></td>
@@ -202,8 +203,9 @@ function filterUrl(string $type, string $filter, int $instanceId, string $q = ''
                         <td><?=e($detail)?></td>
                         <td class="instance-cell"><?=e($item['instance_name'])?></td>
                         <td class="action-cell">
-                            <?php if($type==='movies' && $isMissing):?>
-                                <a class="table-action" href="/diagnose.php?id=<?=(int)$item['id']?>">Why missing?</a>
+                            <?php if($type==='movies'):?>
+                                <a class="table-action" href="/movie.php?id=<?=(int)$item['id']?>">Details</a>
+                                <?php if($isMissing):?><a class="table-action important" href="/diagnose.php?id=<?=(int)$item['id']?>">Why missing?</a><?php endif;?>
                             <?php elseif($type==='series' && $isMissing):?>
                                 <span class="muted">Missing <?=$episodes-$files?> ep.</span>
                             <?php else:?>
@@ -221,5 +223,6 @@ function filterUrl(string $type, string $filter, int $instanceId, string $q = ''
 </main>
 
 <footer>ArrView v<?=e(ARRVIEW_VERSION)?> · Audio & availability focused library monitor</footer>
+<script>document.querySelectorAll('tr[data-details-url]').forEach(row=>row.addEventListener('click',e=>{if(e.target.closest('a,button,input,select'))return;location.href=row.dataset.detailsUrl;}));</script>
 </body>
 </html>
