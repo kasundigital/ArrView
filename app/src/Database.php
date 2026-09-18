@@ -58,6 +58,9 @@ CREATE TABLE IF NOT EXISTS movies (
     monitored INTEGER NOT NULL DEFAULT 0,
     quality TEXT NULL,
     audio_languages TEXT NULL,
+    aired_missing_count INTEGER NOT NULL DEFAULT 0,
+    future_missing_count INTEGER NOT NULL DEFAULT 0,
+    missing_audio_count INTEGER NOT NULL DEFAULT 0,
     path TEXT NULL,
     file_size INTEGER NULL,
     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -162,6 +165,17 @@ SQL);
         }
         if (!$hasAudioLanguages) {
             $this->pdo->exec('ALTER TABLE series ADD COLUMN audio_languages TEXT NULL');
+        }
+
+        $seriesColumnNames = array_column($this->pdo->query('PRAGMA table_info(series)')->fetchAll(), 'name');
+        foreach ([
+            'aired_missing_count' => 'INTEGER NOT NULL DEFAULT 0',
+            'future_missing_count' => 'INTEGER NOT NULL DEFAULT 0',
+            'missing_audio_count' => 'INTEGER NOT NULL DEFAULT 0',
+        ] as $name => $definition) {
+            if (!in_array($name, $seriesColumnNames, true)) {
+                $this->pdo->exec("ALTER TABLE series ADD COLUMN {$name} {$definition}");
+            }
         }
     }
 }
