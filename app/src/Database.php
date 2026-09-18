@@ -82,6 +82,11 @@ CREATE TABLE IF NOT EXISTS series (
     FOREIGN KEY(instance_id) REFERENCES instances(id) ON DELETE CASCADE
 );
 
+CREATE TABLE IF NOT EXISTS app_settings (
+    setting_key TEXT PRIMARY KEY,
+    setting_value TEXT NULL
+);
+
 CREATE TABLE IF NOT EXISTS sync_jobs (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     instance_id INTEGER NOT NULL,
