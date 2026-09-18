@@ -58,6 +58,32 @@ $movie = $details['movie'] ?? [
 $file = $details['file'] ?? null;
 $timeline = $details['timeline'] ?? [];
 $history = $details['history'] ?? [];
+
+$settings = [];
+foreach ($pdo->query("SELECT setting_key,setting_value FROM app_settings WHERE setting_key IN ('public_local_root','public_base_url')")->fetchAll() as $row) {
+    $settings[$row['setting_key']] = $row['setting_value'];
+}
+$publicLocalRoot = rtrim((string)($settings['public_local_root'] ?? ''), "/\\");
+$publicBaseUrl = rtrim((string)($settings['public_base_url'] ?? ''), '/');
+
+function buildPublicMediaUrl(?string $filePath, string $localRoot, string $baseUrl): ?string {
+    if (!$filePath || $localRoot === '' || $baseUrl === '') return null;
+
+    $normalizedPath = str_replace('\\', '/', $filePath);
+    $normalizedRoot = rtrim(str_replace('\\', '/', $localRoot), '/');
+
+    if ($normalizedRoot !== '' && str_starts_with($normalizedPath, $normalizedRoot)) {
+        $relative = ltrim(substr($normalizedPath, strlen($normalizedRoot)), '/');
+    } else {
+        return null;
+    }
+
+    if ($relative === '') return null;
+    $encoded = implode('/', array_map('rawurlencode', explode('/', $relative)));
+    return $baseUrl . '/' . $encoded;
+}
+
+$publicMediaUrl = buildPublicMediaUrl($file['path'] ?? null, $publicLocalRoot, $publicBaseUrl);
 ?>
 <!doctype html>
 <html lang="en">
@@ -115,6 +141,21 @@ $history = $details['history'] ?? [];
         <div class="detail-card"><span>Instance</span><strong><?=e($instance['name'])?></strong></div>
     </section>
 
+    <?php if($publicMediaUrl):?>
+    <section class="panel public-media-panel">
+        <div class="panel-heading-inline"><h2>Public / VOD Link</h2><span class="type-pill radarr">STREAM</span></div>
+        <div class="public-link-box">
+            <a class="public-link-url" href="<?=e($publicMediaUrl)?>" target="_blank" rel="noopener noreferrer"><?=e($publicMediaUrl)?></a>
+            <div class="detail-actions">
+                <a class="support-primary vod-open" href="<?=e($publicMediaUrl)?>" target="_blank" rel="noopener noreferrer">▶ Open VOD</a>
+                <button type="button" class="table-action copy-vod-btn" data-url="<?=e($publicMediaUrl)?>">Copy Link</button>
+            </div>
+        </div>
+    </section>
+    <?php elseif($publicBaseUrl && $publicLocalRoot && !empty($file['path'])):?>
+    <div class="notice info">Public/VOD link is configured, but this file path does not start with the configured local media root.</div>
+    <?php endif;?>
+
     <section class="panel">
         <h2>File information</h2>
         <dl class="detail-list">
@@ -159,5 +200,13 @@ $history = $details['history'] ?? [];
 </main>
 
 <footer>ArrView v<?=e(ARRVIEW_VERSION)?> · Movie details</footer>
+<script>
+document.querySelectorAll('.copy-vod-btn').forEach(btn=>btn.addEventListener('click',async()=>{
+  const original=btn.textContent;
+  try{await navigator.clipboard.writeText(btn.dataset.url);btn.textContent='Copied!';}
+  catch(e){btn.textContent='Copy failed';}
+  setTimeout(()=>btn.textContent=original,1600);
+}));
+</script>
 </body>
 </html>
