@@ -6,6 +6,9 @@ $type = $_GET['type'] ?? null;
 $q = trim($_GET['q'] ?? '');
 $filter = $_GET['filter'] ?? 'all';
 $instanceId = (int)($_GET['instance'] ?? 0);
+$year = (int)($_GET['year'] ?? 0);
+$sort = strtolower((string)($_GET['sort'] ?? 'asc'));
+if (!in_array($sort, ['asc','desc'], true)) $sort = 'asc';
 
 $validFilters = $type === 'series'
     ? ['all','airedmissing','missing','complete','future','noaudio','unmonitored','monitored']
@@ -17,11 +20,21 @@ $seriesCount = (int)$pdo->query('SELECT COUNT(*) FROM series')->fetchColumn();
 $instanceCount = (int)$pdo->query('SELECT COUNT(*) FROM instances WHERE enabled=1')->fetchColumn();
 
 $instances = [];
+$years = [];
 if ($type === 'movies' || $type === 'series') {
     $instanceType = $type === 'movies' ? 'radarr' : 'sonarr';
     $stmt = $pdo->prepare('SELECT id,name FROM instances WHERE enabled=1 AND type=? ORDER BY name COLLATE NOCASE');
     $stmt->execute([$instanceType]);
     $instances = $stmt->fetchAll();
+
+    $yearTable = $type === 'movies' ? 'movies' : 'series';
+    $yearStmt = $pdo->prepare("SELECT DISTINCT y.year
+        FROM {$yearTable} y
+        JOIN instances i ON i.id=y.instance_id
+        WHERE i.enabled=1 AND i.type=? AND y.year IS NOT NULL AND y.year>0
+        ORDER BY y.year DESC");
+    $yearStmt->execute([$instanceType]);
+    $years = array_map('intval', array_column($yearStmt->fetchAll(), 'year'));
 }
 
 $items = [];
@@ -42,6 +55,7 @@ if ($type === 'movies') {
     $sql = 'SELECT m.*, i.name instance_name FROM movies m JOIN instances i ON i.id=m.instance_id WHERE i.enabled=1';
     $params = [];
     if ($instanceId > 0) { $sql .= ' AND m.instance_id=?'; $params[] = $instanceId; }
+    if ($year > 0) { $sql .= ' AND m.year=?'; $params[] = $year; }
     if ($q !== '') { $sql .= ' AND m.title LIKE ?'; $params[] = '%' . $q . '%'; }
 
     if ($filter === 'missing') $sql .= ' AND m.has_file=0';
@@ -49,7 +63,7 @@ if ($type === 'movies') {
     elseif ($filter === 'noaudio') $sql .= " AND m.has_file=1 AND (m.audio_languages IS NULL OR TRIM(m.audio_languages)='')";
     elseif ($filter === 'monitored') $sql .= ' AND m.monitored=1';
 
-    $sql .= ' ORDER BY m.title COLLATE NOCASE LIMIT 1000';
+    $sql .= ' ORDER BY m.title COLLATE NOCASE ' . strtoupper($sort) . ' LIMIT 1000';
     $stmt = $pdo->prepare($sql); $stmt->execute($params); $items = $stmt->fetchAll();
 } elseif ($type === 'series') {
     $countSql = "SELECT
@@ -69,6 +83,7 @@ if ($type === 'movies') {
     $sql = 'SELECT s.*, i.name instance_name FROM series s JOIN instances i ON i.id=s.instance_id WHERE i.enabled=1';
     $params = [];
     if ($instanceId > 0) { $sql .= ' AND s.instance_id=?'; $params[] = $instanceId; }
+    if ($year > 0) { $sql .= ' AND s.year=?'; $params[] = $year; }
     if ($q !== '') { $sql .= ' AND s.title LIKE ?'; $params[] = '%' . $q . '%'; }
 
     if ($filter === 'airedmissing') $sql .= ' AND s.aired_missing_count>0';
@@ -79,16 +94,22 @@ if ($type === 'movies') {
     elseif ($filter === 'unmonitored') $sql .= ' AND s.monitored=0';
     elseif ($filter === 'monitored') $sql .= ' AND s.monitored=1';
 
-    $sql .= ' ORDER BY s.title COLLATE NOCASE LIMIT 1000';
+    $sql .= ' ORDER BY s.title COLLATE NOCASE ' . strtoupper($sort) . ' LIMIT 1000';
     $stmt = $pdo->prepare($sql); $stmt->execute($params); $items = $stmt->fetchAll();
 }
 
-function filterUrl(string $type, string $filter, int $instanceId, string $q = ''): string
+function filterUrl(string $type, string $filter, int $instanceId, string $q = '', int $year = 0, string $sort = 'asc'): string
 {
-    $params = ['type'=>$type, 'filter'=>$filter];
+    $params = ['type'=>$type, 'filter'=>$filter, 'sort'=>$sort];
     if ($instanceId > 0) $params['instance'] = $instanceId;
+    if ($year > 0) $params['year'] = $year;
     if ($q !== '') $params['q'] = $q;
     return '/?' . http_build_query($params);
+}
+
+function sortUrl(string $type, string $filter, int $instanceId, string $q, int $year, string $sort): string
+{
+    return filterUrl($type, $filter, $instanceId, $q, $year, $sort);
 }
 ?>
 <!doctype html>
@@ -136,6 +157,7 @@ function filterUrl(string $type, string $filter, int $instanceId, string $q = ''
     <form class="library-toolbar" method="get">
         <input type="hidden" name="type" value="<?=e($type)?>">
         <input type="hidden" name="filter" value="<?=e($filter)?>">
+        <input type="hidden" name="sort" value="<?=e($sort)?>">
         <div class="toolbar-search">
             <input type="search" name="q" value="<?=e($q)?>" placeholder="Search title..." autocomplete="off">
         </div>
@@ -145,23 +167,29 @@ function filterUrl(string $type, string $filter, int $instanceId, string $q = ''
                 <option value="<?=(int)$instance['id']?>" <?=$instanceId===(int)$instance['id']?'selected':''?>><?=e($instance['name'])?></option>
             <?php endforeach;?>
         </select>
+        <select name="year" onchange="this.form.submit()">
+            <option value="0">All years</option>
+            <?php foreach($years as $availableYear):?>
+                <option value="<?=$availableYear?>" <?=$year===$availableYear?'selected':''?>><?=$availableYear?></option>
+            <?php endforeach;?>
+        </select>
         <button type="submit">Search</button>
-        <?php if($q!=='' || $instanceId>0):?><a class="toolbar-reset" href="/?type=<?=e($type)?>&filter=<?=e($filter)?>">Reset</a><?php endif;?>
+        <?php if($q!=='' || $instanceId>0 || $year>0):?><a class="toolbar-reset" href="/?type=<?=e($type)?>&filter=<?=e($filter)?>&sort=<?=e($sort)?>">Reset</a><?php endif;?>
     </form>
 
     <nav class="quick-filters" aria-label="Library filters">
-        <a class="<?=$filter==='all'?'active':''?>" href="<?=e(filterUrl($type,'all',$instanceId,$q))?>">All <span><?=number_format((int)($filterCounts['total']??0))?></span></a>
-        <a class="<?=$filter==='missing'?'active danger-filter':''?>" href="<?=e(filterUrl($type,'missing',$instanceId,$q))?>">Missing <span><?=number_format((int)($filterCounts['missing']??0))?></span></a>
+        <a class="<?=$filter==='all'?'active':''?>" href="<?=e(filterUrl($type,'all',$instanceId,$q,$year,$sort))?>">All <span><?=number_format((int)($filterCounts['total']??0))?></span></a>
+        <a class="<?=$filter==='missing'?'active danger-filter':''?>" href="<?=e(filterUrl($type,'missing',$instanceId,$q,$year,$sort))?>">Missing <span><?=number_format((int)($filterCounts['missing']??0))?></span></a>
         <?php if($type==='movies'):?>
-            <a class="<?=$filter==='available'?'active':''?>" href="<?=e(filterUrl($type,'available',$instanceId,$q))?>">Available <span><?=number_format((int)($filterCounts['available']??0))?></span></a>
+            <a class="<?=$filter==='available'?'active':''?>" href="<?=e(filterUrl($type,'available',$instanceId,$q,$year,$sort))?>">Available <span><?=number_format((int)($filterCounts['available']??0))?></span></a>
         <?php else:?>
-            <a class="<?=$filter==='airedmissing'?'active danger-filter':''?>" href="<?=e(filterUrl($type,'airedmissing',$instanceId,$q))?>">Aired Missing <span><?=number_format((int)($filterCounts['airedmissing']??0))?></span></a>
-            <a class="<?=$filter==='complete'?'active':''?>" href="<?=e(filterUrl($type,'complete',$instanceId,$q))?>">Complete <span><?=number_format((int)($filterCounts['complete']??0))?></span></a>
-            <a class="<?=$filter==='future'?'active':''?>" href="<?=e(filterUrl($type,'future',$instanceId,$q))?>">Future <span><?=number_format((int)($filterCounts['future']??0))?></span></a>
-            <a class="<?=$filter==='unmonitored'?'active':''?>" href="<?=e(filterUrl($type,'unmonitored',$instanceId,$q))?>">Unmonitored <span><?=number_format((int)($filterCounts['unmonitored']??0))?></span></a>
+            <a class="<?=$filter==='airedmissing'?'active danger-filter':''?>" href="<?=e(filterUrl($type,'airedmissing',$instanceId,$q,$year,$sort))?>">Aired Missing <span><?=number_format((int)($filterCounts['airedmissing']??0))?></span></a>
+            <a class="<?=$filter==='complete'?'active':''?>" href="<?=e(filterUrl($type,'complete',$instanceId,$q,$year,$sort))?>">Complete <span><?=number_format((int)($filterCounts['complete']??0))?></span></a>
+            <a class="<?=$filter==='future'?'active':''?>" href="<?=e(filterUrl($type,'future',$instanceId,$q,$year,$sort))?>">Future <span><?=number_format((int)($filterCounts['future']??0))?></span></a>
+            <a class="<?=$filter==='unmonitored'?'active':''?>" href="<?=e(filterUrl($type,'unmonitored',$instanceId,$q,$year,$sort))?>">Unmonitored <span><?=number_format((int)($filterCounts['unmonitored']??0))?></span></a>
         <?php endif;?>
-        <a class="<?=$filter==='noaudio'?'active warning-filter':''?>" href="<?=e(filterUrl($type,'noaudio',$instanceId,$q))?>">Missing Audio Info <span><?=number_format((int)($filterCounts['noaudio']??0))?></span></a>
-        <a class="<?=$filter==='monitored'?'active':''?>" href="<?=e(filterUrl($type,'monitored',$instanceId,$q))?>">Monitored <span><?=number_format((int)($filterCounts['monitored']??0))?></span></a>
+        <a class="<?=$filter==='noaudio'?'active warning-filter':''?>" href="<?=e(filterUrl($type,'noaudio',$instanceId,$q,$year,$sort))?>">Missing Audio Info <span><?=number_format((int)($filterCounts['noaudio']??0))?></span></a>
+        <a class="<?=$filter==='monitored'?'active':''?>" href="<?=e(filterUrl($type,'monitored',$instanceId,$q,$year,$sort))?>">Monitored <span><?=number_format((int)($filterCounts['monitored']??0))?></span></a>
     </nav>
 
     <?php if(!$items):?>
@@ -171,7 +199,7 @@ function filterUrl(string $type, string $filter, int $instanceId, string $q = ''
             <table class="media-table">
                 <thead>
                     <tr>
-                        <th>Title</th>
+                        <th><a class="sort-link" href="<?=e(sortUrl($type,$filter,$instanceId,$q,$year,$sort==='asc'?'desc':'asc'))?>">Title <?=$sort==='asc'?'▲':'▼'?></a></th>
                         <th>Year</th>
                         <th>File Status</th>
                         <th>Audio Language</th>
