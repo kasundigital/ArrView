@@ -8,7 +8,7 @@ $filter = $_GET['filter'] ?? 'all';
 $instanceId = (int)($_GET['instance'] ?? 0);
 
 $validFilters = $type === 'series'
-    ? ['all','missing','complete','noaudio','monitored']
+    ? ['all','airedmissing','missing','complete','future','noaudio','unmonitored','monitored']
     : ['all','missing','available','noaudio','monitored'];
 if (!in_array($filter, $validFilters, true)) $filter = 'all';
 
@@ -56,7 +56,10 @@ if ($type === 'movies') {
         COUNT(*) total,
         SUM(CASE WHEN s.episode_file_count < s.episode_count THEN 1 ELSE 0 END) missing,
         SUM(CASE WHEN s.episode_count > 0 AND s.episode_file_count >= s.episode_count THEN 1 ELSE 0 END) complete,
-        SUM(CASE WHEN s.episode_file_count > 0 AND (s.audio_languages IS NULL OR TRIM(s.audio_languages)='') THEN 1 ELSE 0 END) noaudio,
+        SUM(CASE WHEN EXISTS(SELECT 1 FROM episodes e WHERE e.series_id=s.id AND e.has_file=0 AND e.monitored=1 AND e.air_date_utc IS NOT NULL AND datetime(e.air_date_utc)<=datetime('now')) THEN 1 ELSE 0 END) airedmissing,
+        SUM(CASE WHEN EXISTS(SELECT 1 FROM episodes e WHERE e.series_id=s.id AND e.has_file=0 AND e.air_date_utc IS NOT NULL AND datetime(e.air_date_utc)>datetime('now')) THEN 1 ELSE 0 END) future,
+        SUM(CASE WHEN EXISTS(SELECT 1 FROM episodes e WHERE e.series_id=s.id AND e.has_file=1 AND (e.audio_languages IS NULL OR TRIM(e.audio_languages)='')) THEN 1 ELSE 0 END) noaudio,
+        SUM(CASE WHEN s.monitored=0 THEN 1 ELSE 0 END) unmonitored,
         SUM(CASE WHEN s.monitored=1 THEN 1 ELSE 0 END) monitored
         FROM series s JOIN instances i ON i.id=s.instance_id WHERE i.enabled=1";
     $countParams = [];
@@ -68,9 +71,12 @@ if ($type === 'movies') {
     if ($instanceId > 0) { $sql .= ' AND s.instance_id=?'; $params[] = $instanceId; }
     if ($q !== '') { $sql .= ' AND s.title LIKE ?'; $params[] = '%' . $q . '%'; }
 
-    if ($filter === 'missing') $sql .= ' AND s.episode_file_count < s.episode_count';
+    if ($filter === 'airedmissing') $sql .= " AND EXISTS(SELECT 1 FROM episodes e WHERE e.series_id=s.id AND e.has_file=0 AND e.monitored=1 AND e.air_date_utc IS NOT NULL AND datetime(e.air_date_utc)<=datetime('now'))";
+    elseif ($filter === 'missing') $sql .= ' AND s.episode_file_count < s.episode_count';
     elseif ($filter === 'complete') $sql .= ' AND s.episode_count > 0 AND s.episode_file_count >= s.episode_count';
-    elseif ($filter === 'noaudio') $sql .= " AND s.episode_file_count > 0 AND (s.audio_languages IS NULL OR TRIM(s.audio_languages)='')";
+    elseif ($filter === 'future') $sql .= " AND EXISTS(SELECT 1 FROM episodes e WHERE e.series_id=s.id AND e.has_file=0 AND e.air_date_utc IS NOT NULL AND datetime(e.air_date_utc)>datetime('now'))";
+    elseif ($filter === 'noaudio') $sql .= " AND EXISTS(SELECT 1 FROM episodes e WHERE e.series_id=s.id AND e.has_file=1 AND (e.audio_languages IS NULL OR TRIM(e.audio_languages)=''))";
+    elseif ($filter === 'unmonitored') $sql .= ' AND s.monitored=0';
     elseif ($filter === 'monitored') $sql .= ' AND s.monitored=1';
 
     $sql .= ' ORDER BY s.title COLLATE NOCASE LIMIT 1000';
@@ -149,7 +155,10 @@ function filterUrl(string $type, string $filter, int $instanceId, string $q = ''
         <?php if($type==='movies'):?>
             <a class="<?=$filter==='available'?'active':''?>" href="<?=e(filterUrl($type,'available',$instanceId,$q))?>">Available <span><?=number_format((int)($filterCounts['available']??0))?></span></a>
         <?php else:?>
+            <a class="<?=$filter==='airedmissing'?'active danger-filter':''?>" href="<?=e(filterUrl($type,'airedmissing',$instanceId,$q))?>">Aired Missing <span><?=number_format((int)($filterCounts['airedmissing']??0))?></span></a>
             <a class="<?=$filter==='complete'?'active':''?>" href="<?=e(filterUrl($type,'complete',$instanceId,$q))?>">Complete <span><?=number_format((int)($filterCounts['complete']??0))?></span></a>
+            <a class="<?=$filter==='future'?'active':''?>" href="<?=e(filterUrl($type,'future',$instanceId,$q))?>">Future <span><?=number_format((int)($filterCounts['future']??0))?></span></a>
+            <a class="<?=$filter==='unmonitored'?'active':''?>" href="<?=e(filterUrl($type,'unmonitored',$instanceId,$q))?>">Unmonitored <span><?=number_format((int)($filterCounts['unmonitored']??0))?></span></a>
         <?php endif;?>
         <a class="<?=$filter==='noaudio'?'active warning-filter':''?>" href="<?=e(filterUrl($type,'noaudio',$instanceId,$q))?>">Missing Audio Info <span><?=number_format((int)($filterCounts['noaudio']??0))?></span></a>
         <a class="<?=$filter==='monitored'?'active':''?>" href="<?=e(filterUrl($type,'monitored',$instanceId,$q))?>">Monitored <span><?=number_format((int)($filterCounts['monitored']??0))?></span></a>
@@ -190,9 +199,9 @@ function filterUrl(string $type, string $filter, int $instanceId, string $q = ''
                         $audio = $item['audio_languages'] ?: ($files > 0 ? 'Unknown' : 'No files');
                     }
                     ?>
-                    <tr class="<?=$isMissing?'row-missing':''?> <?=$type==='movies'?'clickable-row':''?>" <?=$type==='movies'?'data-details-url="/movie.php?id='.(int)$item['id'].'"':''?>>
+                    <tr class="<?=$isMissing?'row-missing':''?> <?=($type==='movies'||$type==='series')?'clickable-row':''?>" <?=$type==='movies'?'data-details-url="/movie.php?id='.(int)$item['id'].'"':($type==='series'?'data-details-url="/series.php?id='.(int)$item['id'].'"':'')?>>
                         <td class="title-cell">
-                            <?php if($type==='movies'):?><a class="movie-title-link" href="/movie.php?id=<?=(int)$item['id']?>"><?=e($item['title'])?></a><?php else:?><strong><?=e($item['title'])?></strong><?php endif;?>
+                            <?php if($type==='movies'):?><a class="movie-title-link" href="/movie.php?id=<?=(int)$item['id']?>"><?=e($item['title'])?></a><?php else:?><a class="movie-title-link" href="/series.php?id=<?=(int)$item['id']?>"><?=e($item['title'])?></a><?php endif;?>
                             <?php if(!(int)$item['monitored']):?><span class="row-note">Not monitored</span><?php endif;?>
                         </td>
                         <td><?=e((string)($item['year'] ?: '—'))?></td>
@@ -206,8 +215,9 @@ function filterUrl(string $type, string $filter, int $instanceId, string $q = ''
                             <?php if($type==='movies'):?>
                                 <a class="table-action" href="/movie.php?id=<?=(int)$item['id']?>">Details</a>
                                 <?php if($isMissing):?><a class="table-action important" href="/diagnose.php?id=<?=(int)$item['id']?>">Why missing?</a><?php endif;?>
-                            <?php elseif($type==='series' && $isMissing):?>
-                                <span class="muted">Missing <?=$episodes-$files?> ep.</span>
+                            <?php elseif($type==='series'):?>
+                                <a class="table-action" href="/series.php?id=<?=(int)$item['id']?>">Seasons & Episodes</a>
+                                <?php if($isMissing):?><span class="muted"> · Missing <?=$episodes-$files?> ep.</span><?php endif;?>
                             <?php else:?>
                                 <span class="muted">—</span>
                             <?php endif;?>
