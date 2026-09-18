@@ -28,6 +28,107 @@ final class ArrService
             : $this->syncSonarr($instance);
     }
 
+    public function movieDetails(array $instance, int $movieId): array
+    {
+        if (($instance['type'] ?? '') !== 'radarr') {
+            throw new RuntimeException('Movie details are available for Radarr only.');
+        }
+
+        $movie = $this->request($instance, '/api/v3/movie/' . $movieId);
+        $movieFile = is_array($movie['movieFile'] ?? null) ? $movie['movieFile'] : null;
+
+        if (!empty($movie['hasFile']) && !$movieFile) {
+            try {
+                $files = $this->request($instance, '/api/v3/moviefile?movieId=' . $movieId);
+                $movieFile = $files[0] ?? null;
+            } catch (Throwable) {
+                $movieFile = null;
+            }
+        }
+
+        $historyRows = [];
+        $grabbedAt = null;
+        $importedAt = null;
+
+        try {
+            $history = $this->request($instance, '/api/v3/history/movie?movieId=' . $movieId . '&includeMovie=false');
+            foreach (array_slice($history, 0, 50) as $event) {
+                $eventType = (string)($event['eventType'] ?? '');
+                $date = $event['date'] ?? null;
+                $data = is_array($event['data'] ?? null) ? $event['data'] : [];
+
+                if ($grabbedAt === null && $eventType === 'grabbed' && $date) {
+                    $grabbedAt = $date;
+                }
+                if ($importedAt === null && $eventType === 'downloadFolderImported' && $date) {
+                    $importedAt = $date;
+                }
+
+                $historyRows[] = [
+                    'event_type' => $eventType,
+                    'date' => $date,
+                    'source_title' => (string)($event['sourceTitle'] ?? ''),
+                    'quality' => $event['quality']['quality']['name'] ?? null,
+                    'languages' => $this->languageNames($event['languages'] ?? []),
+                    'download_id' => $data['downloadId'] ?? null,
+                    'download_client' => $data['downloadClient'] ?? null,
+                    'message' => $data['message'] ?? null,
+                ];
+            }
+        } catch (Throwable) {
+            $historyRows = [];
+        }
+
+        $mediaInfo = is_array($movieFile['mediaInfo'] ?? null) ? $movieFile['mediaInfo'] : [];
+        $audioLanguages = $this->languageNames($movieFile['languages'] ?? [])
+            ?? $this->audioLanguages($movieFile);
+
+        return [
+            'movie' => [
+                'id' => $movie['id'] ?? $movieId,
+                'title' => $movie['title'] ?? 'Unknown',
+                'original_title' => $movie['originalTitle'] ?? null,
+                'year' => $movie['year'] ?? null,
+                'overview' => $movie['overview'] ?? null,
+                'runtime' => $movie['runtime'] ?? null,
+                'studio' => $movie['studio'] ?? null,
+                'status' => $movie['status'] ?? null,
+                'monitored' => !empty($movie['monitored']),
+                'has_file' => !empty($movie['hasFile']),
+                'path' => $movie['path'] ?? null,
+                'added' => $movie['added'] ?? null,
+                'minimum_availability' => $movie['minimumAvailability'] ?? null,
+                'tmdb_id' => $movie['tmdbId'] ?? null,
+                'imdb_id' => $movie['imdbId'] ?? null,
+                'poster_url' => $this->poster($movie['images'] ?? []),
+            ],
+            'file' => $movieFile ? [
+                'id' => $movieFile['id'] ?? null,
+                'relative_path' => $movieFile['relativePath'] ?? null,
+                'path' => $movieFile['path'] ?? (($movie['path'] ?? '') && ($movieFile['relativePath'] ?? '') ? rtrim((string)$movie['path'], '/') . '/' . ltrim((string)$movieFile['relativePath'], '/') : null),
+                'size' => isset($movieFile['size']) ? (int)$movieFile['size'] : null,
+                'date_added' => $movieFile['dateAdded'] ?? null,
+                'quality' => $this->quality($movieFile),
+                'languages' => $audioLanguages,
+                'release_group' => $movieFile['releaseGroup'] ?? null,
+                'scene_name' => $movieFile['sceneName'] ?? null,
+                'video_codec' => $mediaInfo['videoCodec'] ?? null,
+                'video_resolution' => $mediaInfo['resolution'] ?? $mediaInfo['videoResolution'] ?? null,
+                'audio_codec' => $mediaInfo['audioCodec'] ?? null,
+                'audio_channels' => $mediaInfo['audioChannels'] ?? null,
+                'audio_stream_count' => $mediaInfo['audioStreamCount'] ?? null,
+                'subtitles' => $mediaInfo['subtitles'] ?? null,
+            ] : null,
+            'timeline' => [
+                'added_to_radarr' => $movie['added'] ?? null,
+                'grabbed_at' => $grabbedAt,
+                'imported_at' => $importedAt,
+                'file_added_at' => $movieFile['dateAdded'] ?? null,
+            ],
+            'history' => $historyRows,
+        ];
+    }
+
     public function diagnoseMissingMovie(array $instance, int $movieId): array
     {
         if (($instance['type'] ?? '') !== 'radarr') {
