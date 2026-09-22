@@ -77,6 +77,8 @@ CREATE TABLE IF NOT EXISTS series (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     instance_id INTEGER NOT NULL,
     remote_id INTEGER NOT NULL,
+    tmdb_id INTEGER NULL,
+    imdb_id TEXT NULL,
     title TEXT NOT NULL,
     year INTEGER NULL,
     poster_url TEXT NULL,
@@ -209,8 +211,6 @@ CREATE INDEX IF NOT EXISTS idx_movies_title ON movies(title);
 CREATE INDEX IF NOT EXISTS idx_series_title ON series(title);
 CREATE INDEX IF NOT EXISTS idx_movies_instance ON movies(instance_id);
 CREATE INDEX IF NOT EXISTS idx_series_instance ON series(instance_id);
-CREATE INDEX IF NOT EXISTS idx_movies_tmdb ON movies(tmdb_id);
-CREATE INDEX IF NOT EXISTS idx_series_tmdb ON series(tmdb_id);
 CREATE INDEX IF NOT EXISTS idx_sync_jobs_instance ON sync_jobs(instance_id, id DESC);
 CREATE INDEX IF NOT EXISTS idx_episodes_series ON episodes(series_id, season_number, episode_number);
 CREATE INDEX IF NOT EXISTS idx_episodes_instance_remote ON episodes(instance_id, remote_id);
@@ -277,5 +277,8 @@ SQL);
                 $this->pdo->exec("ALTER TABLE series ADD COLUMN {$name} {$definition}");
             }
         }
+
+        $this->pdo->exec('CREATE INDEX IF NOT EXISTS idx_movies_tmdb ON movies(tmdb_id)');
+        $this->pdo->exec('CREATE INDEX IF NOT EXISTS idx_series_tmdb ON series(tmdb_id)');
     }
 }
