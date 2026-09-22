@@ -118,7 +118,16 @@ function apply_branding(string $html): string
     }
 
     $standardFooter = '<footer class="app-footer"><div><span>ArrView v' . e(ARRVIEW_VERSION) . '</span><span class="footer-dot">•</span><span>Designed &amp; Developed by <a href="https://www.kasunindika.com" target="_blank" rel="noopener noreferrer">Kasun Indika</a></span></div></footer>';
-    $html = preg_replace('~<footer\b[^>]*>.*?</footer>~s', $standardFooter, $html) ?? $html;
+    if (preg_match('~<footer\b[^>]*>.*?</footer>~s', $html)) {
+        $html = preg_replace('~<footer\b[^>]*>.*?</footer>~s', $standardFooter, $html) ?? $html;
+    } elseif (str_contains($html, '</body>')) {
+        $html = str_replace('</body>', $standardFooter . '</body>', $html);
+    }
+
+    if (str_contains($html, 'class="auth-shell"') && !str_contains($html, 'class="auth-theme-toggle"')) {
+        $authTheme = '<button type="button" class="theme-toggle auth-theme-toggle" aria-label="Change theme" title="Theme"><span class="theme-icon" aria-hidden="true">◐</span><span class="theme-label">Theme</span></button>';
+        $html = str_replace('<body>', '<body>' . $authTheme, $html);
+    }
 
     $html = str_replace(
         '<a class="brand auth-brand" href="/">ArrView</a>',
