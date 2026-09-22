@@ -47,11 +47,17 @@ if (PHP_SAPI !== 'cli') {
 }
 
 
+function asset_url(string $path): string
+{
+    $separator = str_contains($path, '?') ? '&' : '?';
+    return $path . $separator . 'v=' . rawurlencode(ARRVIEW_VERSION);
+}
+
 function brand_head(): string
 {
-    return '<link rel="icon" href="/assets/arrview-icon.svg" type="image/svg+xml">'
-        . '<link rel="apple-touch-icon" href="/assets/arrview-icon.svg">'
-        . '<link rel="manifest" href="/manifest.webmanifest">'
+    return '<link rel="icon" href="' . e(asset_url('/assets/arrview-icon.svg')) . '" type="image/svg+xml">'
+        . '<link rel="apple-touch-icon" href="' . e(asset_url('/assets/arrview-icon.svg')) . '">'
+        . '<link rel="manifest" href="' . e(asset_url('/manifest.webmanifest')) . '">'
         . '<meta name="theme-color" content="#0b111c">';
 }
 
@@ -59,7 +65,7 @@ function brand_logo(bool $version = true): string
 {
     $versionHtml = $version ? ' <small class="version-chip">v' . e(ARRVIEW_VERSION) . '</small>' : '';
     return '<a class="brand brand-logo" href="/">'
-        . '<img src="/assets/arrview-icon.svg" alt="" aria-hidden="true">'
+        . '<img src="' . e(asset_url('/assets/arrview-icon.svg')) . '" alt="" aria-hidden="true">'
         . '<span class="brand-word">Arr<span>View</span></span>'
         . $versionHtml
         . '</a>';
@@ -69,7 +75,20 @@ function apply_branding(string $html): string
 {
     if (!str_contains($html, '</head>')) return $html;
 
-    if (!str_contains($html, 'arrview-icon.svg')) {
+    // Always version static assets so browsers and reverse proxies cannot serve stale UI from an older release.
+    $html = preg_replace(
+        '~href="/assets/style\.css(?:\?[^"]*)?"~',
+        'href="' . e(asset_url('/assets/style.css')) . '"',
+        $html
+    ) ?? $html;
+
+    $html = str_replace(
+        'src="/assets/arrview-logo.svg"',
+        'src="' . e(asset_url('/assets/arrview-logo.svg')) . '"',
+        $html
+    );
+
+    if (!str_contains($html, 'rel="icon"')) {
         $html = preg_replace('/<\/head>/i', brand_head() . '</head>', $html, 1) ?? $html;
     }
 
