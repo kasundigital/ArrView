@@ -22,7 +22,7 @@ if (!empty($series['details_json'])) {
     $decodedSeries = json_decode((string)$series['details_json'], true);
     if (is_array($decodedSeries)) $rawSeries = $decodedSeries;
 }
-$tmdbId = (int)($rawSeries['tmdbId'] ?? 0);
+$tmdbId = (int)($series['tmdb_id'] ?? $rawSeries['tmdbId'] ?? 0);
 $tmdb = $tmdbId > 0 ? $metadata->cached('series', $tmdbId) : null;
 
 $episodeStmt = $pdo->prepare('SELECT * FROM episodes WHERE series_id=? ORDER BY season_number, episode_number');
