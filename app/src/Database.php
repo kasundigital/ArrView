@@ -41,6 +41,7 @@ CREATE TABLE IF NOT EXISTS instances (
     type TEXT NOT NULL CHECK(type IN ('radarr','sonarr')),
     url TEXT NOT NULL,
     api_key TEXT NOT NULL,
+    webhook_token TEXT NULL,
     enabled INTEGER NOT NULL DEFAULT 1,
     last_sync_at TEXT NULL,
     last_status TEXT NULL,
@@ -79,6 +80,9 @@ CREATE TABLE IF NOT EXISTS series (
     episode_count INTEGER NOT NULL DEFAULT 0,
     episode_file_count INTEGER NOT NULL DEFAULT 0,
     audio_languages TEXT NULL,
+    aired_missing_count INTEGER NOT NULL DEFAULT 0,
+    future_missing_count INTEGER NOT NULL DEFAULT 0,
+    missing_audio_count INTEGER NOT NULL DEFAULT 0,
     path TEXT NULL,
     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     UNIQUE(instance_id, remote_id),
@@ -165,6 +169,16 @@ SQL);
         }
         if (!$hasAudioLanguages) {
             $this->pdo->exec('ALTER TABLE series ADD COLUMN audio_languages TEXT NULL');
+        }
+
+        $instanceColumnNames = array_column($this->pdo->query('PRAGMA table_info(instances)')->fetchAll(), 'name');
+        if (!in_array('webhook_token', $instanceColumnNames, true)) {
+            $this->pdo->exec('ALTER TABLE instances ADD COLUMN webhook_token TEXT NULL');
+        }
+        $tokenRows = $this->pdo->query("SELECT id FROM instances WHERE webhook_token IS NULL OR TRIM(webhook_token)=''")->fetchAll();
+        $setToken = $this->pdo->prepare('UPDATE instances SET webhook_token=? WHERE id=?');
+        foreach ($tokenRows as $row) {
+            $setToken->execute([bin2hex(random_bytes(24)), (int)$row['id']]);
         }
 
         $seriesColumnNames = array_column($this->pdo->query('PRAGMA table_info(series)')->fetchAll(), 'name');
