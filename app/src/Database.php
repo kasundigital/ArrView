@@ -53,6 +53,8 @@ CREATE TABLE IF NOT EXISTS movies (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     instance_id INTEGER NOT NULL,
     remote_id INTEGER NOT NULL,
+    tmdb_id INTEGER NULL,
+    imdb_id TEXT NULL,
     title TEXT NOT NULL,
     year INTEGER NULL,
     poster_url TEXT NULL,
@@ -207,6 +209,8 @@ CREATE INDEX IF NOT EXISTS idx_movies_title ON movies(title);
 CREATE INDEX IF NOT EXISTS idx_series_title ON series(title);
 CREATE INDEX IF NOT EXISTS idx_movies_instance ON movies(instance_id);
 CREATE INDEX IF NOT EXISTS idx_series_instance ON series(instance_id);
+CREATE INDEX IF NOT EXISTS idx_movies_tmdb ON movies(tmdb_id);
+CREATE INDEX IF NOT EXISTS idx_series_tmdb ON series(tmdb_id);
 CREATE INDEX IF NOT EXISTS idx_sync_jobs_instance ON sync_jobs(instance_id, id DESC);
 CREATE INDEX IF NOT EXISTS idx_episodes_series ON episodes(series_id, season_number, episode_number);
 CREATE INDEX IF NOT EXISTS idx_episodes_instance_remote ON episodes(instance_id, remote_id);
@@ -253,6 +257,12 @@ SQL);
         if (!in_array('details_json', $movieColumnNames, true)) {
             $this->pdo->exec('ALTER TABLE movies ADD COLUMN details_json TEXT NULL');
         }
+        if (!in_array('tmdb_id', $movieColumnNames, true)) {
+            $this->pdo->exec('ALTER TABLE movies ADD COLUMN tmdb_id INTEGER NULL');
+        }
+        if (!in_array('imdb_id', $movieColumnNames, true)) {
+            $this->pdo->exec('ALTER TABLE movies ADD COLUMN imdb_id TEXT NULL');
+        }
 
         $seriesColumnNames = array_column($this->pdo->query('PRAGMA table_info(series)')->fetchAll(), 'name');
         foreach ([
@@ -260,6 +270,8 @@ SQL);
             'future_missing_count' => 'INTEGER NOT NULL DEFAULT 0',
             'missing_audio_count' => 'INTEGER NOT NULL DEFAULT 0',
             'details_json' => 'TEXT NULL',
+            'tmdb_id' => 'INTEGER NULL',
+            'imdb_id' => 'TEXT NULL',
         ] as $name => $definition) {
             if (!in_array($name, $seriesColumnNames, true)) {
                 $this->pdo->exec("ALTER TABLE series ADD COLUMN {$name} {$definition}");
