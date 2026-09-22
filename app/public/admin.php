@@ -69,14 +69,71 @@ $baseAppUrl = $scheme . '://' . $host;
 </form>
 <?php if($publicLocalRoot && $publicBaseUrl):?><p class="meta">Example mapping: <code><?=e($publicLocalRoot)?></code> → <code><?=e($publicBaseUrl)?></code></p><?php endif;?>
 </section>
-<section class="panel"><h2>Configured Instances</h2><?php if(!$instances):?><div class="empty compact"><p>No instances configured yet.</p></div><?php else:?><div class="instance-list"><?php foreach($instances as $instance):?><article class="instance-row" data-instance-id="<?=(int)$instance['id']?>"><div class="instance-main"><div class="instance-title"><span class="type-pill <?=e($instance['type'])?>"><?=e(ucfirst($instance['type']))?></span><strong><?=e($instance['name'])?></strong></div><p><?=e($instance['url'])?></p><small>Last update: <?=e($instance['last_sync_at'] ?: 'Never')?><?=$instance['last_status']?' · '.e($instance['last_status']):''?></small><small>Last full reconciliation: <?=e($instance['last_full_sync_at'] ?: 'Never')?> · automatic every 12 hours</small>
-<?php $webhookUrl=$baseAppUrl.'/webhook.php?instance='.(int)$instance['id'].'&token='.rawurlencode((string)$instance['webhook_token']); ?>
-<div class="webhook-box">
-  <span>Automatic sync webhook</span>
-  <code><?=e($webhookUrl)?></code>
-  <small>Add this URL in <?=e(ucfirst($instance['type']))?> → Settings → Connect → Webhook. Enable import/download, upgrade, rename and delete events. ArrView will refresh the affected movie or series immediately.</small>
-</div>
-<div class="sync-progress" hidden><div class="sync-progress-head"><strong class="sync-count">0 / 0</strong><span class="sync-percent">0%</span></div><div class="sync-track"><div class="sync-fill" style="width:0%"></div></div><div class="sync-current">Preparing...</div></div></div><div class="actions"><a class="table-action" href="/instance-edit.php?id=<?=(int)$instance['id']?>">Edit</a><form method="post"><?=csrf_field()?> <input type="hidden" name="action" value="test"><input type="hidden" name="id" value="<?=(int)$instance['id']?>"><button>Test</button></form><button type="button" class="primary sync-btn" data-instance-id="<?=(int)$instance['id']?>">Sync Now</button><form method="post"><?=csrf_field()?> <input type="hidden" name="action" value="toggle"><input type="hidden" name="id" value="<?=(int)$instance['id']?>"><button><?=$instance['enabled']?'Disable':'Enable'?></button></form><form method="post" onsubmit="return confirm('Delete this instance and its cached media?')"><?=csrf_field()?> <input type="hidden" name="action" value="delete"><input type="hidden" name="id" value="<?=(int)$instance['id']?>"><button class="danger">Delete</button></form></div></article><?php endforeach;?></div><?php endif;?></section></main><footer>ArrView Admin</footer>
+<section class="panel instance-panel">
+  <div class="panel-heading-inline instance-panel-head">
+    <div><p class="eyebrow">CONNECTED SERVICES</p><h2>Configured Instances</h2></div>
+    <span class="instance-count"><?=count($instances)?> configured</span>
+  </div>
+  <?php if(!$instances):?>
+    <div class="empty compact"><p>No instances configured yet.</p></div>
+  <?php else:?>
+  <div class="instance-list">
+    <?php foreach($instances as $instance):
+      $webhookUrl=$baseAppUrl.'/webhook.php?instance='.(int)$instance['id'].'&token='.rawurlencode((string)$instance['webhook_token']);
+      $statusOk = str_starts_with((string)$instance['last_status'], 'OK') || str_contains((string)$instance['last_status'], 'Webhook update');
+    ?>
+    <article class="instance-card" data-instance-id="<?=(int)$instance['id']?>">
+      <div class="instance-card-top">
+        <div class="instance-identity">
+          <div class="instance-icon <?=e($instance['type'])?>"><?=strtoupper(substr((string)$instance['type'],0,1))?></div>
+          <div>
+            <div class="instance-title">
+              <span class="type-pill <?=e($instance['type'])?>"><?=e(ucfirst($instance['type']))?></span>
+              <strong><?=e($instance['name'])?></strong>
+              <span class="instance-state <?=$instance['enabled']?'enabled':'disabled'?>"><?=$instance['enabled']?'Enabled':'Disabled'?></span>
+            </div>
+            <a class="instance-url" href="<?=e($instance['url'])?>" target="_blank" rel="noopener noreferrer"><?=e($instance['url'])?> ↗</a>
+          </div>
+        </div>
+        <div class="instance-actions">
+          <a class="table-action" href="/instance-edit.php?id=<?=(int)$instance['id']?>">Edit</a>
+          <form method="post"><?=csrf_field()?> <input type="hidden" name="action" value="test"><input type="hidden" name="id" value="<?=(int)$instance['id']?>"><button type="submit">Test</button></form>
+          <button type="button" class="primary sync-btn" data-instance-id="<?=(int)$instance['id']?>">Sync Now</button>
+          <form method="post"><?=csrf_field()?> <input type="hidden" name="action" value="toggle"><input type="hidden" name="id" value="<?=(int)$instance['id']?>"><button type="submit"><?=$instance['enabled']?'Disable':'Enable'?></button></form>
+          <form method="post" onsubmit="return confirm('Delete this instance and its cached media?')"><?=csrf_field()?> <input type="hidden" name="action" value="delete"><input type="hidden" name="id" value="<?=(int)$instance['id']?>"><button type="submit" class="danger">Delete</button></form>
+        </div>
+      </div>
+
+      <div class="instance-meta-grid">
+        <div><span>Last update</span><strong><?=e($instance['last_sync_at'] ?: 'Never')?></strong></div>
+        <div><span>Full reconciliation</span><strong><?=e($instance['last_full_sync_at'] ?: 'Never')?></strong></div>
+        <div><span>Status</span><strong class="<?=$statusOk?'status-text-ok':'status-text-muted'?>"><?=e($instance['last_status'] ?: 'Waiting for first sync')?></strong></div>
+      </div>
+
+      <details class="webhook-details">
+        <summary>
+          <span>Automatic Sync Webhook</span>
+          <small>Instant updates from <?=e(ucfirst($instance['type']))?></small>
+        </summary>
+        <div class="webhook-box">
+          <div class="webhook-url-row">
+            <code><?=e($webhookUrl)?></code>
+            <button type="button" class="copy-webhook-btn" data-url="<?=e($webhookUrl)?>">Copy</button>
+          </div>
+          <small>Add this URL in <?=e(ucfirst($instance['type']))?> → Settings → Connect → Webhook. Enable import/download, upgrade, rename and delete events. ArrView refreshes only the affected movie or series.</small>
+        </div>
+      </details>
+
+      <div class="sync-progress" hidden>
+        <div class="sync-progress-head"><strong class="sync-count">0 / 0</strong><span class="sync-percent">0%</span></div>
+        <div class="sync-track"><div class="sync-fill" style="width:0%"></div></div>
+        <div class="sync-current">Preparing...</div>
+      </div>
+    </article>
+    <?php endforeach;?>
+  </div>
+  <?php endif;?>
+</section></main><footer>ArrView Admin</footer>
 <script>
 const sleep=ms=>new Promise(r=>setTimeout(r,ms));
 async function pollSync(jobId,row,button){
@@ -97,11 +154,24 @@ async function pollSync(jobId,row,button){
 }
 for(const button of document.querySelectorAll('.sync-btn')){
   button.addEventListener('click',async()=>{
-    const id=button.dataset.instanceId,row=button.closest('.instance-row'),box=row.querySelector('.sync-progress'); box.classList.remove('failed'); box.hidden=false; row.querySelector('.sync-current').textContent='Starting background sync...'; button.disabled=true;
+    const id=button.dataset.instanceId,row=button.closest('.instance-card'),box=row.querySelector('.sync-progress'); box.classList.remove('failed'); box.hidden=false; row.querySelector('.sync-current').textContent='Starting background sync...'; button.disabled=true;
     try{
       const body=new URLSearchParams({instance_id:id,csrf_token:'<?=e($auth->csrfToken())?>'}); const r=await fetch('/sync-start.php',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body}); const d=await r.json();
       if(!d.ok) throw new Error(d.message||'Could not start sync'); await pollSync(d.job_id,row,button);
     }catch(e){button.disabled=false;button.textContent='Retry Sync';row.querySelector('.sync-current').textContent=e.message||'Could not start sync';box.classList.add('failed');}
   });
 }
+document.querySelectorAll('.copy-webhook-btn').forEach(button=>{
+  button.addEventListener('click',async()=>{
+    const original=button.textContent;
+    try{
+      await navigator.clipboard.writeText(button.dataset.url);
+      button.textContent='Copied';
+      button.classList.add('copied');
+    }catch(e){
+      button.textContent='Copy failed';
+    }
+    setTimeout(()=>{button.textContent=original;button.classList.remove('copied');},1600);
+  });
+});
 </script></body></html>
