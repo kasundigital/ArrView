@@ -58,7 +58,9 @@ function brand_head(): string
     return '<link rel="icon" href="' . e(asset_url('/assets/arrview-icon.svg')) . '" type="image/svg+xml">'
         . '<link rel="apple-touch-icon" href="' . e(asset_url('/assets/arrview-icon.svg')) . '">'
         . '<link rel="manifest" href="' . e(asset_url('/manifest.webmanifest')) . '">'
-        . '<meta name="theme-color" content="#0b111c">';
+        . '<meta name="theme-color" content="#0b111c" id="theme-color-meta">'
+        . '<script>(function(){try{var t=localStorage.getItem("arrview-theme")||"system";var d=t==="system"?(matchMedia("(prefers-color-scheme: light)").matches?"light":"dark"):t;document.documentElement.dataset.theme=d;document.documentElement.dataset.themePreference=t;}catch(e){document.documentElement.dataset.theme="dark";}})();</script>'
+        . '<script defer src="' . e(asset_url('/assets/app.js')) . '"></script>';
 }
 
 function brand_logo(bool $version = true): string
@@ -97,6 +99,26 @@ function apply_branding(string $html): string
         brand_logo(),
         $html
     ) ?? $html;
+
+    // Shared application chrome: mobile menu, theme control, and standard footer.
+    if (str_contains($html, '<header class="topbar">') && !str_contains($html, 'class="nav-toggle"')) {
+        $html = preg_replace(
+            '~(<header class="topbar">\s*' . preg_quote(brand_logo(), '~') . ')~',
+            '$1<button type="button" class="nav-toggle" aria-label="Open navigation" aria-expanded="false"><span></span><span></span><span></span></button>',
+            $html,
+            1
+        ) ?? $html;
+
+        $html = preg_replace(
+            '~(<header class="topbar">.*?<nav>)(.*?)(</nav></header>)~s',
+            '$1$2<button type="button" class="theme-toggle" aria-label="Change theme" title="Theme"><span class="theme-icon" aria-hidden="true">◐</span><span class="theme-label">Theme</span></button>$3',
+            $html,
+            1
+        ) ?? $html;
+    }
+
+    $standardFooter = '<footer class="app-footer"><div><span>ArrView v' . e(ARRVIEW_VERSION) . '</span><span class="footer-dot">•</span><span>Designed &amp; Developed by <a href="https://www.kasunindika.com" target="_blank" rel="noopener noreferrer">Kasun Indika</a></span></div></footer>';
+    $html = preg_replace('~<footer\b[^>]*>.*?</footer>~s', $standardFooter, $html) ?? $html;
 
     $html = str_replace(
         '<a class="brand auth-brand" href="/">ArrView</a>',
