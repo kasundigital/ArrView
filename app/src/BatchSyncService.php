@@ -83,7 +83,7 @@ VALUES (:instance_id, :remote_id, :title, :year, :poster_url, :monitored, :episo
 ON CONFLICT(instance_id, remote_id) DO UPDATE SET
  title=excluded.title, year=excluded.year, poster_url=excluded.poster_url,
  monitored=excluded.monitored, episode_count=excluded.episode_count,
- episode_file_count=excluded.episode_file_count, audio_languages=excluded.audio_languages,
+ episode_file_count=excluded.episode_file_count, audio_languages=COALESCE(excluded.audio_languages, series.audio_languages),
  path=excluded.path, updated_at=CURRENT_TIMESTAMP
 SQL;
             $seriesStmt = $this->pdo->prepare($seriesSql);
@@ -124,18 +124,23 @@ SQL;
                 $seenSeries[] = $remoteId;
 
                 $episodes = [];
+                $episodeFetchSucceeded = true;
                 try {
                     $episodes = $this->requestJson(
                         $instance,
                         '/api/v3/episode?seriesId=' . $remoteId . '&includeEpisodeFile=true'
                     );
                 } catch (Throwable) {
+                    $episodeFetchSucceeded = false;
                     $episodes = [];
                 }
 
                 $languages = [];
                 $seenEpisodes = [];
                 $actualFileCount = 0;
+                $airedMissingCount = 0;
+                $futureMissingCount = 0;
+                $missingAudioCount = 0;
 
                 $this->pdo->beginTransaction();
                 try {
@@ -225,23 +230,25 @@ SQL;
                         $episodeCount++;
                     }
 
-                    $this->removeStaleEpisodes((int)$instance['id'], $seriesLocalId, $seenEpisodes);
+                    if ($episodeFetchSucceeded) {
+                        $this->removeStaleEpisodes((int)$instance['id'], $seriesLocalId, $seenEpisodes);
 
-                    $names = array_keys($languages);
-                    natcasesort($names);
-                    $audioLanguages = $names ? implode(', ', $names) : null;
+                        $names = array_keys($languages);
+                        natcasesort($names);
+                        $audioLanguages = $names ? implode(', ', $names) : null;
 
-                    $updateSeries = $this->pdo->prepare(
-                        'UPDATE series SET audio_languages=?, episode_file_count=?, aired_missing_count=?, future_missing_count=?, missing_audio_count=? WHERE id=?'
-                    );
-                    $updateSeries->execute([
-                        $audioLanguages,
-                        $episodes ? $actualFileCount : (int)($stats['episodeFileCount'] ?? 0),
-                        $airedMissingCount,
-                        $futureMissingCount,
-                        $missingAudioCount,
-                        $seriesLocalId,
-                    ]);
+                        $updateSeries = $this->pdo->prepare(
+                            'UPDATE series SET audio_languages=?, episode_file_count=?, aired_missing_count=?, future_missing_count=?, missing_audio_count=? WHERE id=?'
+                        );
+                        $updateSeries->execute([
+                            $audioLanguages,
+                            $actualFileCount,
+                            $airedMissingCount,
+                            $futureMissingCount,
+                            $missingAudioCount,
+                            $seriesLocalId,
+                        ]);
+                    }
 
                     $this->pdo->commit();
                 } catch (Throwable $e) {
@@ -271,6 +278,212 @@ SQL;
         } finally {
             @unlink($tmp);
         }
+    }
+
+    public function syncWebhookEvent(array $instance, array $event): array
+    {
+        $eventType = strtolower((string)($event['eventType'] ?? $event['event_type'] ?? 'unknown'));
+
+        if (($instance['type'] ?? '') === 'radarr') {
+            $movieId = (int)($event['movie']['id'] ?? $event['movieId'] ?? 0);
+            if ($movieId < 1) {
+                return ['ok'=>true,'message'=>'Webhook received; no movie id supplied.'];
+            }
+            if (str_contains($eventType, 'delete') && !str_contains($eventType, 'filedelete')) {
+                $stmt = $this->pdo->prepare('DELETE FROM movies WHERE instance_id=? AND remote_id=?');
+                $stmt->execute([(int)$instance['id'], $movieId]);
+                return ['ok'=>true,'message'=>'Removed deleted movie from ArrView cache.'];
+            }
+            $this->refreshRadarrMovie($instance, $movieId);
+            return ['ok'=>true,'message'=>'Movie cache refreshed from Radarr.'];
+        }
+
+        $seriesId = (int)($event['series']['id'] ?? $event['seriesId'] ?? 0);
+        if ($seriesId < 1) {
+            return ['ok'=>true,'message'=>'Webhook received; no series id supplied.'];
+        }
+        if (str_contains($eventType, 'seriesdelete')) {
+            $stmt = $this->pdo->prepare('DELETE FROM series WHERE instance_id=? AND remote_id=?');
+            $stmt->execute([(int)$instance['id'], $seriesId]);
+            return ['ok'=>true,'message'=>'Removed deleted series from ArrView cache.'];
+        }
+        $this->refreshSonarrSeries($instance, $seriesId);
+        return ['ok'=>true,'message'=>'Series and episode cache refreshed from Sonarr.'];
+    }
+
+    private function refreshRadarrMovie(array $instance, int $movieId): void
+    {
+        $movie = $this->requestJson($instance, '/api/v3/movie/' . $movieId);
+        $movieFile = is_array($movie['movieFile'] ?? null) ? $movie['movieFile'] : null;
+
+        $sql = <<<'SQL'
+INSERT INTO movies (instance_id, remote_id, title, year, poster_url, has_file, monitored, quality, audio_languages, path, file_size, updated_at)
+VALUES (:instance_id, :remote_id, :title, :year, :poster_url, :has_file, :monitored, :quality, :audio_languages, :path, :file_size, CURRENT_TIMESTAMP)
+ON CONFLICT(instance_id, remote_id) DO UPDATE SET
+ title=excluded.title, year=excluded.year, poster_url=excluded.poster_url,
+ has_file=excluded.has_file, monitored=excluded.monitored, quality=excluded.quality,
+ audio_languages=excluded.audio_languages, path=excluded.path, file_size=excluded.file_size,
+ updated_at=CURRENT_TIMESTAMP
+SQL;
+        $stmt = $this->pdo->prepare($sql);
+        $stmt->execute([
+            ':instance_id'=>(int)$instance['id'],
+            ':remote_id'=>$movieId,
+            ':title'=>(string)($movie['title'] ?? 'Unknown'),
+            ':year'=>$movie['year'] ?? null,
+            ':poster_url'=>$this->poster($movie['images'] ?? []),
+            ':has_file'=>!empty($movie['hasFile']) ? 1 : 0,
+            ':monitored'=>!empty($movie['monitored']) ? 1 : 0,
+            ':quality'=>$this->quality($movieFile),
+            ':audio_languages'=>$this->audioLanguages($movieFile),
+            ':path'=>$movie['path'] ?? null,
+            ':file_size'=>$movieFile['size'] ?? null,
+        ]);
+        $this->markSync((int)$instance['id'], 'Webhook update - movie refreshed');
+    }
+
+    private function refreshSonarrSeries(array $instance, int $seriesId): void
+    {
+        $series = $this->requestJson($instance, '/api/v3/series/' . $seriesId);
+        $episodes = $this->requestJson($instance, '/api/v3/episode?seriesId=' . $seriesId . '&includeEpisodeFile=true');
+        $stats = is_array($series['statistics'] ?? null) ? $series['statistics'] : [];
+
+        $seriesSql = <<<'SQL'
+INSERT INTO series (instance_id, remote_id, title, year, poster_url, monitored, episode_count, episode_file_count, audio_languages, path, updated_at)
+VALUES (:instance_id, :remote_id, :title, :year, :poster_url, :monitored, :episode_count, :episode_file_count, :audio_languages, :path, CURRENT_TIMESTAMP)
+ON CONFLICT(instance_id, remote_id) DO UPDATE SET
+ title=excluded.title, year=excluded.year, poster_url=excluded.poster_url,
+ monitored=excluded.monitored, episode_count=excluded.episode_count,
+ episode_file_count=excluded.episode_file_count, path=excluded.path, updated_at=CURRENT_TIMESTAMP
+SQL;
+        $seriesStmt = $this->pdo->prepare($seriesSql);
+
+        $this->pdo->beginTransaction();
+        try {
+            $seriesStmt->execute([
+                ':instance_id'=>(int)$instance['id'],
+                ':remote_id'=>$seriesId,
+                ':title'=>(string)($series['title'] ?? 'Unknown'),
+                ':year'=>$series['year'] ?? null,
+                ':poster_url'=>$this->poster($series['images'] ?? []),
+                ':monitored'=>!empty($series['monitored']) ? 1 : 0,
+                ':episode_count'=>(int)($stats['episodeCount'] ?? count($episodes)),
+                ':episode_file_count'=>(int)($stats['episodeFileCount'] ?? 0),
+                ':audio_languages'=>null,
+                ':path'=>$series['path'] ?? null,
+            ]);
+
+            $localStmt = $this->pdo->prepare('SELECT id FROM series WHERE instance_id=? AND remote_id=? LIMIT 1');
+            $localStmt->execute([(int)$instance['id'], $seriesId]);
+            $seriesLocalId = (int)$localStmt->fetchColumn();
+            if ($seriesLocalId < 1) throw new RuntimeException('Could not resolve cached series row.');
+
+            $episodeSql = <<<'SQL'
+INSERT INTO episodes (
+ instance_id, series_id, series_remote_id, remote_id, season_number, episode_number,
+ absolute_episode_number, title, air_date_utc, monitored, has_file, episode_file_id,
+ relative_path, file_path, file_size, quality, audio_languages, date_added,
+ release_group, scene_name, video_codec, video_resolution, audio_codec, audio_channels, updated_at
+) VALUES (
+ :instance_id, :series_id, :series_remote_id, :remote_id, :season_number, :episode_number,
+ :absolute_episode_number, :title, :air_date_utc, :monitored, :has_file, :episode_file_id,
+ :relative_path, :file_path, :file_size, :quality, :audio_languages, :date_added,
+ :release_group, :scene_name, :video_codec, :video_resolution, :audio_codec, :audio_channels, CURRENT_TIMESTAMP
+)
+ON CONFLICT(instance_id, remote_id) DO UPDATE SET
+ series_id=excluded.series_id, series_remote_id=excluded.series_remote_id,
+ season_number=excluded.season_number, episode_number=excluded.episode_number,
+ absolute_episode_number=excluded.absolute_episode_number, title=excluded.title,
+ air_date_utc=excluded.air_date_utc, monitored=excluded.monitored, has_file=excluded.has_file,
+ episode_file_id=excluded.episode_file_id, relative_path=excluded.relative_path,
+ file_path=excluded.file_path, file_size=excluded.file_size, quality=excluded.quality,
+ audio_languages=excluded.audio_languages, date_added=excluded.date_added,
+ release_group=excluded.release_group, scene_name=excluded.scene_name,
+ video_codec=excluded.video_codec, video_resolution=excluded.video_resolution,
+ audio_codec=excluded.audio_codec, audio_channels=excluded.audio_channels, updated_at=CURRENT_TIMESTAMP
+SQL;
+            $episodeStmt = $this->pdo->prepare($episodeSql);
+            $seen = [];
+            $languages = [];
+            $fileCount = 0;
+            $airedMissingCount = 0;
+            $futureMissingCount = 0;
+            $missingAudioCount = 0;
+            $now = new DateTimeImmutable('now', new DateTimeZone('UTC'));
+
+            foreach ($episodes as $episode) {
+                if (!is_array($episode)) continue;
+                $episodeId = (int)($episode['id'] ?? 0);
+                if ($episodeId < 1) continue;
+                $seen[] = $episodeId;
+                $file = is_array($episode['episodeFile'] ?? null) ? $episode['episodeFile'] : null;
+                $hasFile = !empty($episode['hasFile']) || $file !== null;
+                if ($hasFile) $fileCount++;
+
+                $airDateUtc = $episode['airDateUtc'] ?? null;
+                if (!$hasFile && $airDateUtc) {
+                    try {
+                        $aired = new DateTimeImmutable((string)$airDateUtc) <= $now;
+                        if ($aired && !empty($episode['monitored'])) $airedMissingCount++;
+                        elseif (!$aired) $futureMissingCount++;
+                    } catch (Throwable) {}
+                }
+
+                $languageText = $this->audioLanguages($file);
+                if ($hasFile && !$languageText) $missingAudioCount++;
+                if ($languageText) {
+                    foreach (array_map('trim', explode(',', $languageText)) as $language) {
+                        if ($language !== '') $languages[$language] = true;
+                    }
+                }
+
+                $mediaInfo = is_array($file['mediaInfo'] ?? null) ? $file['mediaInfo'] : [];
+                $relativePath = $file['relativePath'] ?? null;
+                $seriesPath = (string)($series['path'] ?? '');
+                $filePath = $file['path'] ?? ($seriesPath !== '' && $relativePath
+                    ? rtrim($seriesPath, '/\\') . '/' . ltrim((string)$relativePath, '/\\')
+                    : null);
+
+                $episodeStmt->execute([
+                    ':instance_id'=>(int)$instance['id'],
+                    ':series_id'=>$seriesLocalId,
+                    ':series_remote_id'=>$seriesId,
+                    ':remote_id'=>$episodeId,
+                    ':season_number'=>(int)($episode['seasonNumber'] ?? 0),
+                    ':episode_number'=>(int)($episode['episodeNumber'] ?? 0),
+                    ':absolute_episode_number'=>$episode['absoluteEpisodeNumber'] ?? null,
+                    ':title'=>(string)($episode['title'] ?? 'Episode'),
+                    ':air_date_utc'=>$airDateUtc,
+                    ':monitored'=>!empty($episode['monitored']) ? 1 : 0,
+                    ':has_file'=>$hasFile ? 1 : 0,
+                    ':episode_file_id'=>$file['id'] ?? null,
+                    ':relative_path'=>$relativePath,
+                    ':file_path'=>$filePath,
+                    ':file_size'=>$file['size'] ?? null,
+                    ':quality'=>$this->quality($file),
+                    ':audio_languages'=>$languageText,
+                    ':date_added'=>$file['dateAdded'] ?? null,
+                    ':release_group'=>$file['releaseGroup'] ?? null,
+                    ':scene_name'=>$file['sceneName'] ?? null,
+                    ':video_codec'=>$mediaInfo['videoCodec'] ?? null,
+                    ':video_resolution'=>$mediaInfo['resolution'] ?? $mediaInfo['videoResolution'] ?? null,
+                    ':audio_codec'=>$mediaInfo['audioCodec'] ?? null,
+                    ':audio_channels'=>$mediaInfo['audioChannels'] ?? null,
+                ]);
+            }
+
+            $this->removeStaleEpisodes((int)$instance['id'], $seriesLocalId, $seen);
+            $names = array_keys($languages);
+            natcasesort($names);
+            $audioLanguages = $names ? implode(', ', $names) : null;
+            $update = $this->pdo->prepare('UPDATE series SET audio_languages=?,episode_file_count=?,aired_missing_count=?,future_missing_count=?,missing_audio_count=? WHERE id=?');
+            $update->execute([$audioLanguages,$fileCount,$airedMissingCount,$futureMissingCount,$missingAudioCount,$seriesLocalId]);
+            $this->pdo->commit();
+        } catch (Throwable $e) {
+            if ($this->pdo->inTransaction()) $this->pdo->rollBack();
+            throw $e;
+        }
+        $this->markSync((int)$instance['id'], 'Webhook update - series refreshed');
     }
 
     private function requestJson(array $instance, string $path): array
