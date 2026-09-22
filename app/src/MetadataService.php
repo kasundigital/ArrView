@@ -17,8 +17,11 @@ final class MetadataService
         $settings = [];
         foreach ($rows as $row) $settings[$row['setting_key']] = $row['setting_value'];
 
+        $mode = (string)($settings['metadata_mode'] ?? 'free');
+        if (!in_array($mode, ['free','personal'], true)) $mode = 'free';
+
         return [
-            'mode' => in_array(($settings['metadata_mode'] ?? 'free'), ['free','personal'], true) ? $settings['metadata_mode'] : 'free',
+            'mode' => $mode,
             'tmdb_api_key' => (string)($settings['tmdb_api_key'] ?? ''),
             'installation_id' => (string)($settings['installation_id'] ?? ''),
             'free_endpoint' => rtrim((string)(getenv('ARRVIEW_METADATA_API_URL') ?: self::DEFAULT_FREE_ENDPOINT), '?&'),
