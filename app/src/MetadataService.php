@@ -49,8 +49,8 @@ final class MetadataService
         return [
             'movies_cached' => (int)$this->pdo->query("SELECT COUNT(*) FROM media_metadata WHERE media_type='movie'")->fetchColumn(),
             'series_cached' => (int)$this->pdo->query("SELECT COUNT(*) FROM media_metadata WHERE media_type='series'")->fetchColumn(),
-            'pending_movies' => (int)$this->pdo->query("SELECT COUNT(*) FROM movies m WHERE json_extract(m.details_json,'$.tmdbId') IS NOT NULL AND NOT EXISTS (SELECT 1 FROM media_metadata mm WHERE mm.media_type='movie' AND mm.tmdb_id=json_extract(m.details_json,'$.tmdbId'))")->fetchColumn(),
-            'pending_series' => (int)$this->pdo->query("SELECT COUNT(*) FROM series s WHERE json_extract(s.details_json,'$.tmdbId') IS NOT NULL AND NOT EXISTS (SELECT 1 FROM media_metadata mm WHERE mm.media_type='series' AND mm.tmdb_id=json_extract(s.details_json,'$.tmdbId'))")->fetchColumn(),
+            'pending_movies' => (int)$this->pdo->query("SELECT COUNT(*) FROM movies m WHERE m.tmdb_id IS NOT NULL AND m.tmdb_id>0 AND NOT EXISTS (SELECT 1 FROM media_metadata mm WHERE mm.media_type='movie' AND mm.tmdb_id=m.tmdb_id)")->fetchColumn(),
+            'pending_series' => (int)$this->pdo->query("SELECT COUNT(*) FROM series s WHERE s.tmdb_id IS NOT NULL AND s.tmdb_id>0 AND NOT EXISTS (SELECT 1 FROM media_metadata mm WHERE mm.media_type='series' AND mm.tmdb_id=s.tmdb_id)")->fetchColumn(),
         ];
     }
 
@@ -105,14 +105,14 @@ final class MetadataService
 
     public function testConnection(): array
     {
-        $row = $this->pdo->query("SELECT details_json,title FROM movies WHERE json_extract(details_json,'$.tmdbId') IS NOT NULL LIMIT 1")->fetch();
+        $row = $this->pdo->query("SELECT tmdb_id,title FROM movies WHERE tmdb_id IS NOT NULL AND tmdb_id>0 LIMIT 1")->fetch();
         $type = 'movie';
         if (!$row) {
-            $row = $this->pdo->query("SELECT details_json,title FROM series WHERE json_extract(details_json,'$.tmdbId') IS NOT NULL LIMIT 1")->fetch();
+            $row = $this->pdo->query("SELECT tmdb_id,title FROM series WHERE tmdb_id IS NOT NULL AND tmdb_id>0 LIMIT 1")->fetch();
             $type = 'series';
         }
         if (!$row) throw new RuntimeException('No cached Radarr/Sonarr item with a TMDB ID is available yet.');
-        $tmdbId = $this->extractTmdbId((string)$row['details_json']);
+        $tmdbId = (int)$row['tmdb_id'];
         $result = $this->enrich($type, $tmdbId, true);
         return ['ok'=>true,'message'=>'TMDB metadata connected using ' . ($result['source'] ?? 'configured source') . '.'];
     }
@@ -121,9 +121,9 @@ final class MetadataService
     {
         $targets = [];
         foreach (['movie'=>'movies','series'=>'series'] as $type=>$table) {
-            $rows = $this->pdo->query("SELECT title,details_json FROM {$table} WHERE details_json IS NOT NULL")->fetchAll();
+            $rows = $this->pdo->query("SELECT title,tmdb_id FROM {$table} WHERE tmdb_id IS NOT NULL AND tmdb_id>0")->fetchAll();
             foreach ($rows as $row) {
-                $tmdbId = $this->extractTmdbId((string)$row['details_json']);
+                $tmdbId = (int)$row['tmdb_id'];
                 if ($tmdbId > 0) $targets[] = [$type,$tmdbId,(string)$row['title']];
             }
         }
