@@ -26,3 +26,9 @@
 .library-toolbar{grid-template-columns:minmax(240px,1fr) minmax(150px,220px) minmax(120px,160px) auto auto}.sort-link{color:#cfd8e6;text-decoration:none;display:inline-flex;align-items:center;gap:5px}.sort-link:hover{color:#fff}
 @media(max-width:900px){.library-toolbar{grid-template-columns:1fr 1fr}.library-toolbar .toolbar-search{grid-column:1/-1}}
 @media(max-width:600px){.library-toolbar{grid-template-columns:1fr}.library-toolbar .toolbar-search{grid-column:auto}}
+
+/* v0.9 automatic Radarr/Sonarr webhook sync */
+.webhook-box{margin-top:10px;padding:10px 12px;border:1px solid var(--line);border-radius:10px;background:#0a1018;display:grid;gap:5px;max-width:720px}
+.webhook-box>span{font-size:9px;font-weight:850;letter-spacing:.8px;text-transform:uppercase;color:#9eabc0}
+.webhook-box code{font:11px ui-monospace,SFMono-Regular,Menlo,monospace;color:#b8c8ff;overflow-wrap:anywhere;user-select:all}
+.webhook-box small{font-size:10px;line-height:1.45;color:#7f8da2}
