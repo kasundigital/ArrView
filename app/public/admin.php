@@ -24,8 +24,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $url = trim($_POST['url'] ?? '');
             $apiKey = trim($_POST['api_key'] ?? '');
             if ($name === '' || !in_array($type, ['radarr','sonarr'], true) || $url === '' || $apiKey === '') throw new RuntimeException('All fields are required.');
-            $stmt = $pdo->prepare('INSERT INTO instances(name,type,url,api_key) VALUES(?,?,?,?)');
-            $stmt->execute([$name,$type,rtrim($url,'/'),$apiKey]);
+            $stmt = $pdo->prepare('INSERT INTO instances(name,type,url,api_key,webhook_token) VALUES(?,?,?,?,?)');
+            $stmt->execute([$name,$type,rtrim($url,'/'),$apiKey,bin2hex(random_bytes(24))]);
             $message = 'Instance added.';
         } elseif ($action === 'delete') {
             $stmt = $pdo->prepare('DELETE FROM instances WHERE id=?'); $stmt->execute([(int)($_POST['id'] ?? 0)]); $message='Instance deleted.';
@@ -47,6 +47,12 @@ foreach ($pdo->query("SELECT setting_key,setting_value FROM app_settings WHERE s
 }
 $publicLocalRoot = $settings['public_local_root'] ?? '';
 $publicBaseUrl = $settings['public_base_url'] ?? '';
+$forwardedProto = strtolower(trim(explode(',', (string)($_SERVER['HTTP_X_FORWARDED_PROTO'] ?? ''))[0] ?? ''));
+$scheme = in_array($forwardedProto, ['http','https'], true)
+    ? $forwardedProto
+    : (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off' ? 'https' : 'http');
+$host = preg_replace('/[^A-Za-z0-9.\-:\[\]]/', '', (string)($_SERVER['HTTP_HOST'] ?? 'localhost'));
+$baseAppUrl = $scheme . '://' . $host;
 ?>
 <!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Admin · ArrView</title><link rel="stylesheet" href="/assets/style.css"></head><body>
 <header class="topbar"><a class="brand" href="/">ArrView <small class="version-chip">v<?=e(ARRVIEW_VERSION)?></small></a><nav><a href="/">Library</a><a class="active" href="/admin.php">Instances</a><a href="/users.php">Users</a><a href="/support.php">Support</a><span class="user-chip"><?=e($currentUser['username'])?></span><a href="/logout.php">Logout</a></nav></header>
@@ -63,7 +69,14 @@ $publicBaseUrl = $settings['public_base_url'] ?? '';
 </form>
 <?php if($publicLocalRoot && $publicBaseUrl):?><p class="meta">Example mapping: <code><?=e($publicLocalRoot)?></code> → <code><?=e($publicBaseUrl)?></code></p><?php endif;?>
 </section>
-<section class="panel"><h2>Configured Instances</h2><?php if(!$instances):?><div class="empty compact"><p>No instances configured yet.</p></div><?php else:?><div class="instance-list"><?php foreach($instances as $instance):?><article class="instance-row" data-instance-id="<?=(int)$instance['id']?>"><div class="instance-main"><div class="instance-title"><span class="type-pill <?=e($instance['type'])?>"><?=e(ucfirst($instance['type']))?></span><strong><?=e($instance['name'])?></strong></div><p><?=e($instance['url'])?></p><small>Last sync: <?=e($instance['last_sync_at'] ?: 'Never')?><?=$instance['last_status']?' · '.e($instance['last_status']):''?></small><div class="sync-progress" hidden><div class="sync-progress-head"><strong class="sync-count">0 / 0</strong><span class="sync-percent">0%</span></div><div class="sync-track"><div class="sync-fill" style="width:0%"></div></div><div class="sync-current">Preparing...</div></div></div><div class="actions"><a class="table-action" href="/instance-edit.php?id=<?=(int)$instance['id']?>">Edit</a><form method="post"><?=csrf_field()?> <input type="hidden" name="action" value="test"><input type="hidden" name="id" value="<?=(int)$instance['id']?>"><button>Test</button></form><button type="button" class="primary sync-btn" data-instance-id="<?=(int)$instance['id']?>">Sync Now</button><form method="post"><?=csrf_field()?> <input type="hidden" name="action" value="toggle"><input type="hidden" name="id" value="<?=(int)$instance['id']?>"><button><?=$instance['enabled']?'Disable':'Enable'?></button></form><form method="post" onsubmit="return confirm('Delete this instance and its cached media?')"><?=csrf_field()?> <input type="hidden" name="action" value="delete"><input type="hidden" name="id" value="<?=(int)$instance['id']?>"><button class="danger">Delete</button></form></div></article><?php endforeach;?></div><?php endif;?></section></main><footer>ArrView Admin</footer>
+<section class="panel"><h2>Configured Instances</h2><?php if(!$instances):?><div class="empty compact"><p>No instances configured yet.</p></div><?php else:?><div class="instance-list"><?php foreach($instances as $instance):?><article class="instance-row" data-instance-id="<?=(int)$instance['id']?>"><div class="instance-main"><div class="instance-title"><span class="type-pill <?=e($instance['type'])?>"><?=e(ucfirst($instance['type']))?></span><strong><?=e($instance['name'])?></strong></div><p><?=e($instance['url'])?></p><small>Last sync: <?=e($instance['last_sync_at'] ?: 'Never')?><?=$instance['last_status']?' · '.e($instance['last_status']):''?></small>
+<?php $webhookUrl=$baseAppUrl.'/webhook.php?instance='.(int)$instance['id'].'&token='.rawurlencode((string)$instance['webhook_token']); ?>
+<div class="webhook-box">
+  <span>Automatic sync webhook</span>
+  <code><?=e($webhookUrl)?></code>
+  <small>Add this URL in <?=e(ucfirst($instance['type']))?> → Settings → Connect → Webhook. Enable import/download, upgrade, rename and delete events. ArrView will refresh the affected movie or series immediately.</small>
+</div>
+<div class="sync-progress" hidden><div class="sync-progress-head"><strong class="sync-count">0 / 0</strong><span class="sync-percent">0%</span></div><div class="sync-track"><div class="sync-fill" style="width:0%"></div></div><div class="sync-current">Preparing...</div></div></div><div class="actions"><a class="table-action" href="/instance-edit.php?id=<?=(int)$instance['id']?>">Edit</a><form method="post"><?=csrf_field()?> <input type="hidden" name="action" value="test"><input type="hidden" name="id" value="<?=(int)$instance['id']?>"><button>Test</button></form><button type="button" class="primary sync-btn" data-instance-id="<?=(int)$instance['id']?>">Sync Now</button><form method="post"><?=csrf_field()?> <input type="hidden" name="action" value="toggle"><input type="hidden" name="id" value="<?=(int)$instance['id']?>"><button><?=$instance['enabled']?'Disable':'Enable'?></button></form><form method="post" onsubmit="return confirm('Delete this instance and its cached media?')"><?=csrf_field()?> <input type="hidden" name="action" value="delete"><input type="hidden" name="id" value="<?=(int)$instance['id']?>"><button class="danger">Delete</button></form></div></article><?php endforeach;?></div><?php endif;?></section></main><footer>ArrView Admin</footer>
 <script>
 const sleep=ms=>new Promise(r=>setTimeout(r,ms));
 async function pollSync(jobId,row,button){
