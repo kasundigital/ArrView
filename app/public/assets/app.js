@@ -85,6 +85,16 @@
     }
   }
 
+  // Add mobile labels to responsive table cards.
+  document.querySelectorAll('.media-table').forEach(table => {
+    const labels = [...table.querySelectorAll('thead th')].map(th => th.textContent.trim().replace(/[↕▲▼]/g,'').trim());
+    table.querySelectorAll('tbody tr').forEach(row => {
+      [...row.children].forEach((cell,index) => {
+        if (labels[index]) cell.dataset.label = labels[index];
+      });
+    });
+  });
+
   // Standard submit feedback, excluding background sync controls.
   document.querySelectorAll('form').forEach(form => {
     form.addEventListener('submit', () => {
