@@ -254,3 +254,6 @@ button.is-loading:after,.table-action.is-loading:after{content:"";width:13px;hei
   .footer-dot{display:none}
   .app-footer>div{flex-direction:column;gap:3px}
 }
+
+.auth-theme-toggle{position:fixed;top:16px;right:16px;z-index:50;background:var(--panel)!important}
+.auth-shell+.app-footer{margin-top:0}
