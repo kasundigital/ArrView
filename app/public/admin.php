@@ -11,6 +11,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if ($action === 'save_metadata') {
             $mode = (string)($_POST['metadata_mode'] ?? 'free');
             $key = trim((string)($_POST['tmdb_api_key'] ?? ''));
+            if ($mode === 'personal' && $key === '' && $metadata->settings()['tmdb_api_key'] === '') {
+                throw new RuntimeException('Enter a TMDB API key or Bearer token before enabling Personal TMDB mode.');
+            }
             $metadata->saveSettings($mode, $key !== '' ? $key : null);
             $message = $mode === 'personal'
                 ? 'Personal TMDB metadata mode saved.'
