@@ -44,6 +44,7 @@ CREATE TABLE IF NOT EXISTS instances (
     webhook_token TEXT NULL,
     enabled INTEGER NOT NULL DEFAULT 1,
     last_sync_at TEXT NULL,
+    last_full_sync_at TEXT NULL,
     last_status TEXT NULL,
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
@@ -64,6 +65,7 @@ CREATE TABLE IF NOT EXISTS movies (
     missing_audio_count INTEGER NOT NULL DEFAULT 0,
     path TEXT NULL,
     file_size INTEGER NULL,
+    details_json TEXT NULL,
     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     UNIQUE(instance_id, remote_id),
     FOREIGN KEY(instance_id) REFERENCES instances(id) ON DELETE CASCADE
@@ -84,6 +86,7 @@ CREATE TABLE IF NOT EXISTS series (
     future_missing_count INTEGER NOT NULL DEFAULT 0,
     missing_audio_count INTEGER NOT NULL DEFAULT 0,
     path TEXT NULL,
+    details_json TEXT NULL,
     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     UNIQUE(instance_id, remote_id),
     FOREIGN KEY(instance_id) REFERENCES instances(id) ON DELETE CASCADE
@@ -175,10 +178,18 @@ SQL);
         if (!in_array('webhook_token', $instanceColumnNames, true)) {
             $this->pdo->exec('ALTER TABLE instances ADD COLUMN webhook_token TEXT NULL');
         }
+        if (!in_array('last_full_sync_at', $instanceColumnNames, true)) {
+            $this->pdo->exec('ALTER TABLE instances ADD COLUMN last_full_sync_at TEXT NULL');
+        }
         $tokenRows = $this->pdo->query("SELECT id FROM instances WHERE webhook_token IS NULL OR TRIM(webhook_token)=''")->fetchAll();
         $setToken = $this->pdo->prepare('UPDATE instances SET webhook_token=? WHERE id=?');
         foreach ($tokenRows as $row) {
             $setToken->execute([bin2hex(random_bytes(24)), (int)$row['id']]);
+        }
+
+        $movieColumnNames = array_column($this->pdo->query('PRAGMA table_info(movies)')->fetchAll(), 'name');
+        if (!in_array('details_json', $movieColumnNames, true)) {
+            $this->pdo->exec('ALTER TABLE movies ADD COLUMN details_json TEXT NULL');
         }
 
         $seriesColumnNames = array_column($this->pdo->query('PRAGMA table_info(series)')->fetchAll(), 'name');
@@ -186,6 +197,7 @@ SQL);
             'aired_missing_count' => 'INTEGER NOT NULL DEFAULT 0',
             'future_missing_count' => 'INTEGER NOT NULL DEFAULT 0',
             'missing_audio_count' => 'INTEGER NOT NULL DEFAULT 0',
+            'details_json' => 'TEXT NULL',
         ] as $name => $definition) {
             if (!in_array($name, $seriesColumnNames, true)) {
                 $this->pdo->exec("ALTER TABLE series ADD COLUMN {$name} {$definition}");
