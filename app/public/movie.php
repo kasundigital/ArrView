@@ -49,6 +49,8 @@ function dateLabel(?string $date): string {
     }
 }
 
+$tmdbId = (int)($rawMovie['tmdbId'] ?? 0);
+$tmdb = $tmdbId > 0 ? $metadata->cached('movie', $tmdbId) : null;
 $rawFile = is_array($rawMovie['movieFile'] ?? null) ? $rawMovie['movieFile'] : null;
 $mediaInfo = is_array($rawFile['mediaInfo'] ?? null) ? $rawFile['mediaInfo'] : [];
 $movie = [
@@ -61,9 +63,9 @@ $movie = [
     'has_file'=>(bool)($rawMovie['hasFile'] ?? $cached['has_file']),
     'path'=>$rawMovie['path'] ?? $cached['path'],
     'status'=>$rawMovie['status'] ?? null,
-    'overview'=>$rawMovie['overview'] ?? null,
-    'runtime'=>$rawMovie['runtime'] ?? null,
-    'studio'=>$rawMovie['studio'] ?? null,
+    'overview'=>$rawMovie['overview'] ?? ($tmdb['overview'] ?? null),
+    'runtime'=>$rawMovie['runtime'] ?? ($tmdb['runtime'] ?? null),
+    'studio'=>$rawMovie['studio'] ?? (!empty($tmdb['companies']) ? implode(', ', array_values(array_filter(array_map(fn($x)=>is_array($x)?($x['name']??null):null, $tmdb['companies'])))) : null),
 ];
 $file = $rawFile ? [
     'path'=>$rawFile['path'] ?? (($movie['path'] ?? '') && !empty($rawFile['relativePath']) ? rtrim((string)$movie['path'],'/\\') . '/' . ltrim((string)$rawFile['relativePath'],'/\\') : null),
@@ -156,6 +158,8 @@ $publicMediaUrl = buildPublicMediaUrl($file['path'] ?? null, $publicLocalRoot, $
             <div class="detail-actions">
                 <?php if(empty($movie['has_file'])):?><a class="table-action important" href="/diagnose.php?id=<?=$id?>">Why missing?</a><?php endif;?>
                 <?php if(!empty($movie['title_slug'])):?><a class="table-action" href="<?=e(rtrim($instance['url'],'/').'/movie/'.$movie['title_slug'])?>" target="_blank" rel="noopener noreferrer">Open in Radarr ↗</a><?php else:?><a class="table-action" href="<?=e(rtrim($instance['url'],'/'))?>" target="_blank" rel="noopener noreferrer">Open Radarr ↗</a><?php endif;?>
+                <?php if($tmdbId>0):?><a class="table-action tmdb-link" href="https://www.themoviedb.org/movie/<?=$tmdbId?>" target="_blank" rel="noopener noreferrer">TMDB #<?=$tmdbId?> ↗</a><?php endif;?>
+                <?php if(!empty($tmdb['imdb_id'])):?><a class="table-action" href="https://www.imdb.com/title/<?=e($tmdb['imdb_id'])?>/" target="_blank" rel="noopener noreferrer">IMDb ↗</a><?php endif;?>
             </div>
         </div>
     </section>
@@ -182,6 +186,25 @@ $publicMediaUrl = buildPublicMediaUrl($file['path'] ?? null, $publicLocalRoot, $
     </section>
     <?php elseif($publicBaseUrl && $publicLocalRoot && !empty($file['path'])):?>
     <div class="notice info">Public/VOD link is configured, but this file path does not start with the configured local media root.</div>
+    <?php endif;?>
+
+    <?php if($tmdbId>0):?>
+    <section class="panel tmdb-panel">
+        <div class="panel-heading-inline"><div><p class="eyebrow">TMDB METADATA</p><h2>Movie information</h2></div><span class="type-pill radarr">TMDB #<?=$tmdbId?></span></div>
+        <?php if($tmdb):?>
+        <dl class="detail-list metadata-detail-list">
+            <div><dt>Original title</dt><dd><?=e($tmdb['original_title'] ?: '—')?></dd></div>
+            <div><dt>Release date</dt><dd><?=e($tmdb['release_date'] ?: '—')?></dd></div>
+            <div><dt>Genres</dt><dd><?=e(!empty($tmdb['genres']) ? implode(', ', array_values(array_filter(array_map(fn($x)=>is_array($x)?($x['name']??null):null,$tmdb['genres'])))) : '—')?></dd></div>
+            <div><dt>Production</dt><dd><?=e(!empty($tmdb['companies']) ? implode(', ', array_values(array_filter(array_map(fn($x)=>is_array($x)?($x['name']??null):null,$tmdb['companies'])))) : '—')?></dd></div>
+            <div><dt>Original language</dt><dd><?=e(strtoupper((string)($tmdb['original_language'] ?: '—')))?></dd></div>
+            <div><dt>TMDB rating</dt><dd><?=!empty($tmdb['vote_count'])?e(number_format((float)$tmdb['vote_average'],1)).' / 10 · '.number_format((int)$tmdb['vote_count']).' votes':'—'?></dd></div>
+            <div><dt>Metadata source</dt><dd><?=e($tmdb['source'] ?? 'TMDB')?> · cached <?=e(dateLabel($tmdb['fetched_at'] ?? null))?></dd></div>
+        </dl>
+        <?php else:?>
+        <div class="metadata-empty"><strong>TMDB ID found, metadata not cached yet.</strong><p>Run <b>Admin → TMDB Metadata → Enrich Metadata</b>. ArrView will save it locally and future page views will use SQLite only.</p></div>
+        <?php endif;?>
+    </section>
     <?php endif;?>
 
     <section class="panel">
