@@ -46,6 +46,58 @@ if (PHP_SAPI !== 'cli') {
     }
 }
 
+
+function brand_head(): string
+{
+    return '<link rel="icon" href="/assets/arrview-icon.svg" type="image/svg+xml">'
+        . '<link rel="apple-touch-icon" href="/assets/arrview-icon.svg">'
+        . '<link rel="manifest" href="/manifest.webmanifest">'
+        . '<meta name="theme-color" content="#0b111c">';
+}
+
+function brand_logo(bool $version = true): string
+{
+    $versionHtml = $version ? ' <small class="version-chip">v' . e(ARRVIEW_VERSION) . '</small>' : '';
+    return '<a class="brand brand-logo" href="/">'
+        . '<img src="/assets/arrview-icon.svg" alt="" aria-hidden="true">'
+        . '<span class="brand-word">Arr<span>View</span></span>'
+        . $versionHtml
+        . '</a>';
+}
+
+function apply_branding(string $html): string
+{
+    if (!str_contains($html, '</head>')) return $html;
+
+    if (!str_contains($html, 'arrview-icon.svg')) {
+        $html = preg_replace('/<\/head>/i', brand_head() . '</head>', $html, 1) ?? $html;
+    }
+
+    $html = preg_replace(
+        '~<a class="brand" href="/">ArrView(?:\s*<small class="version-chip">v<\?=e\(ARRVIEW_VERSION\)\?><\/small>)?<\/a>~',
+        brand_logo(),
+        $html
+    ) ?? $html;
+
+    $html = str_replace(
+        '<a class="brand auth-brand" href="/">ArrView</a>',
+        '<img class="auth-logo" src="/assets/arrview-logo.svg" alt="ArrView">',
+        $html
+    );
+
+    if (str_contains($html, 'FIRST-TIME SETUP') && !str_contains($html, 'class="auth-logo"')) {
+        $html = str_replace(
+            '<section class="auth-card">',
+            '<section class="auth-card"><img class="auth-logo" src="/assets/arrview-logo.svg" alt="ArrView">',
+            $html
+        );
+    }
+
+    return $html;
+}
+
+ob_start('apply_branding');
+
 function e(?string $value): string
 {
     return htmlspecialchars((string)$value, ENT_QUOTES, 'UTF-8');
