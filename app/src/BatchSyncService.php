@@ -24,10 +24,10 @@ final class BatchSyncService
             $seen = [];
             $count = 0;
             $sql = <<<'SQL'
-INSERT INTO movies (instance_id, remote_id, title, year, poster_url, has_file, monitored, quality, audio_languages, path, file_size, details_json, updated_at)
-VALUES (:instance_id, :remote_id, :title, :year, :poster_url, :has_file, :monitored, :quality, :audio_languages, :path, :file_size, :details_json, CURRENT_TIMESTAMP)
+INSERT INTO movies (instance_id, remote_id, tmdb_id, imdb_id, title, year, poster_url, has_file, monitored, quality, audio_languages, path, file_size, details_json, updated_at)
+VALUES (:instance_id, :remote_id, :tmdb_id, :imdb_id, :title, :year, :poster_url, :has_file, :monitored, :quality, :audio_languages, :path, :file_size, :details_json, CURRENT_TIMESTAMP)
 ON CONFLICT(instance_id, remote_id) DO UPDATE SET
- title=excluded.title, year=excluded.year, poster_url=excluded.poster_url,
+ tmdb_id=excluded.tmdb_id, imdb_id=excluded.imdb_id, title=excluded.title, year=excluded.year, poster_url=excluded.poster_url,
  has_file=excluded.has_file, monitored=excluded.monitored, quality=excluded.quality,
  audio_languages=excluded.audio_languages, path=excluded.path, file_size=excluded.file_size,
  details_json=excluded.details_json, updated_at=CURRENT_TIMESTAMP
@@ -42,6 +42,8 @@ SQL;
                     $movieFile = $movie['movieFile'] ?? null;
                     $stmt->execute([
                         ':instance_id' => (int)$instance['id'], ':remote_id' => $remoteId,
+                        ':tmdb_id' => !empty($movie['tmdbId']) ? (int)$movie['tmdbId'] : null,
+                        ':imdb_id' => $movie['imdbId'] ?? null,
                         ':title' => (string)($movie['title'] ?? 'Unknown'), ':year' => $movie['year'] ?? null,
                         ':poster_url' => $this->poster($movie['images'] ?? []), ':has_file' => !empty($movie['hasFile']) ? 1 : 0,
                         ':monitored' => !empty($movie['monitored']) ? 1 : 0, ':quality' => $this->quality($movieFile),
@@ -79,10 +81,10 @@ SQL;
             $episodeCount = 0;
 
             $seriesSql = <<<'SQL'
-INSERT INTO series (instance_id, remote_id, title, year, poster_url, monitored, episode_count, episode_file_count, audio_languages, path, details_json, updated_at)
-VALUES (:instance_id, :remote_id, :title, :year, :poster_url, :monitored, :episode_count, :episode_file_count, :audio_languages, :path, :details_json, CURRENT_TIMESTAMP)
+INSERT INTO series (instance_id, remote_id, tmdb_id, imdb_id, title, year, poster_url, monitored, episode_count, episode_file_count, audio_languages, path, details_json, updated_at)
+VALUES (:instance_id, :remote_id, :tmdb_id, :imdb_id, :title, :year, :poster_url, :monitored, :episode_count, :episode_file_count, :audio_languages, :path, :details_json, CURRENT_TIMESTAMP)
 ON CONFLICT(instance_id, remote_id) DO UPDATE SET
- title=excluded.title, year=excluded.year, poster_url=excluded.poster_url,
+ tmdb_id=excluded.tmdb_id, imdb_id=excluded.imdb_id, title=excluded.title, year=excluded.year, poster_url=excluded.poster_url,
  monitored=excluded.monitored, episode_count=excluded.episode_count,
  episode_file_count=excluded.episode_file_count, audio_languages=COALESCE(excluded.audio_languages, series.audio_languages),
  path=excluded.path, details_json=excluded.details_json, updated_at=CURRENT_TIMESTAMP
@@ -150,6 +152,8 @@ SQL;
                     $seriesStmt->execute([
                         ':instance_id'=>(int)$instance['id'],
                         ':remote_id'=>$remoteId,
+                        ':tmdb_id'=>!empty($series['tmdbId']) ? (int)$series['tmdbId'] : null,
+                        ':imdb_id'=>$series['imdbId'] ?? null,
                         ':title'=>(string)($series['title'] ?? 'Unknown'),
                         ':year'=>$series['year'] ?? null,
                         ':poster_url'=>$this->poster($series['images'] ?? []),
@@ -319,18 +323,20 @@ SQL;
         $movieFile = is_array($movie['movieFile'] ?? null) ? $movie['movieFile'] : null;
 
         $sql = <<<'SQL'
-INSERT INTO movies (instance_id, remote_id, title, year, poster_url, has_file, monitored, quality, audio_languages, path, file_size, details_json, updated_at)
-VALUES (:instance_id, :remote_id, :title, :year, :poster_url, :has_file, :monitored, :quality, :audio_languages, :path, :file_size, :details_json, CURRENT_TIMESTAMP)
+INSERT INTO movies (instance_id, remote_id, tmdb_id, imdb_id, title, year, poster_url, has_file, monitored, quality, audio_languages, path, file_size, details_json, updated_at)
+VALUES (:instance_id, :remote_id, :tmdb_id, :imdb_id, :title, :year, :poster_url, :has_file, :monitored, :quality, :audio_languages, :path, :file_size, :details_json, CURRENT_TIMESTAMP)
 ON CONFLICT(instance_id, remote_id) DO UPDATE SET
- title=excluded.title, year=excluded.year, poster_url=excluded.poster_url,
+ tmdb_id=excluded.tmdb_id, imdb_id=excluded.imdb_id, title=excluded.title, year=excluded.year, poster_url=excluded.poster_url,
  has_file=excluded.has_file, monitored=excluded.monitored, quality=excluded.quality,
  audio_languages=excluded.audio_languages, path=excluded.path, file_size=excluded.file_size,
- updated_at=CURRENT_TIMESTAMP
+ details_json=excluded.details_json, updated_at=CURRENT_TIMESTAMP
 SQL;
         $stmt = $this->pdo->prepare($sql);
         $stmt->execute([
             ':instance_id'=>(int)$instance['id'],
             ':remote_id'=>$movieId,
+            ':tmdb_id'=>!empty($movie['tmdbId']) ? (int)$movie['tmdbId'] : null,
+            ':imdb_id'=>$movie['imdbId'] ?? null,
             ':title'=>(string)($movie['title'] ?? 'Unknown'),
             ':year'=>$movie['year'] ?? null,
             ':poster_url'=>$this->poster($movie['images'] ?? []),
@@ -352,10 +358,10 @@ SQL;
         $stats = is_array($series['statistics'] ?? null) ? $series['statistics'] : [];
 
         $seriesSql = <<<'SQL'
-INSERT INTO series (instance_id, remote_id, title, year, poster_url, monitored, episode_count, episode_file_count, audio_languages, path, details_json, updated_at)
-VALUES (:instance_id, :remote_id, :title, :year, :poster_url, :monitored, :episode_count, :episode_file_count, :audio_languages, :path, :details_json, CURRENT_TIMESTAMP)
+INSERT INTO series (instance_id, remote_id, tmdb_id, imdb_id, title, year, poster_url, monitored, episode_count, episode_file_count, audio_languages, path, details_json, updated_at)
+VALUES (:instance_id, :remote_id, :tmdb_id, :imdb_id, :title, :year, :poster_url, :monitored, :episode_count, :episode_file_count, :audio_languages, :path, :details_json, CURRENT_TIMESTAMP)
 ON CONFLICT(instance_id, remote_id) DO UPDATE SET
- title=excluded.title, year=excluded.year, poster_url=excluded.poster_url,
+ tmdb_id=excluded.tmdb_id, imdb_id=excluded.imdb_id, title=excluded.title, year=excluded.year, poster_url=excluded.poster_url,
  monitored=excluded.monitored, episode_count=excluded.episode_count,
  episode_file_count=excluded.episode_file_count, path=excluded.path, details_json=excluded.details_json, updated_at=CURRENT_TIMESTAMP
 SQL;
@@ -366,6 +372,8 @@ SQL;
             $seriesStmt->execute([
                 ':instance_id'=>(int)$instance['id'],
                 ':remote_id'=>$seriesId,
+                ':tmdb_id'=>!empty($series['tmdbId']) ? (int)$series['tmdbId'] : null,
+                ':imdb_id'=>$series['imdbId'] ?? null,
                 ':title'=>(string)($series['title'] ?? 'Unknown'),
                 ':year'=>$series['year'] ?? null,
                 ':poster_url'=>$this->poster($series['images'] ?? []),

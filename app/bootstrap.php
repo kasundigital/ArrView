@@ -6,6 +6,7 @@ require_once __DIR__ . '/version.php';
 require_once __DIR__ . '/src/Database.php';
 require_once __DIR__ . '/src/ArrService.php';
 require_once __DIR__ . '/src/BatchSyncService.php';
+require_once __DIR__ . '/src/MetadataService.php';
 require_once __DIR__ . '/src/Auth.php';
 
 $dataDir = getenv('ARRVIEW_DATA') ?: (__DIR__ . '/data');
@@ -13,6 +14,7 @@ $db = new Database(rtrim($dataDir, '/') . '/arrview.sqlite');
 $pdo = $db->pdo;
 $arr = new ArrService($pdo);
 $batchSync = new BatchSyncService($pdo);
+$metadata = new MetadataService($pdo);
 $auth = new Auth($pdo);
 
 // Lightweight self-healing reconciliation: normal pages read SQLite only.

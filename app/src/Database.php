@@ -53,6 +53,8 @@ CREATE TABLE IF NOT EXISTS movies (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     instance_id INTEGER NOT NULL,
     remote_id INTEGER NOT NULL,
+    tmdb_id INTEGER NULL,
+    imdb_id TEXT NULL,
     title TEXT NOT NULL,
     year INTEGER NULL,
     poster_url TEXT NULL,
@@ -75,6 +77,8 @@ CREATE TABLE IF NOT EXISTS series (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     instance_id INTEGER NOT NULL,
     remote_id INTEGER NOT NULL,
+    tmdb_id INTEGER NULL,
+    imdb_id TEXT NULL,
     title TEXT NOT NULL,
     year INTEGER NULL,
     poster_url TEXT NULL,
@@ -135,6 +139,59 @@ CREATE TABLE IF NOT EXISTS diagnostic_cache (
     checked_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
+CREATE TABLE IF NOT EXISTS media_metadata (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    media_type TEXT NOT NULL CHECK(media_type IN ('movie','series')),
+    tmdb_id INTEGER NOT NULL,
+    imdb_id TEXT NULL,
+    title TEXT NULL,
+    original_title TEXT NULL,
+    overview TEXT NULL,
+    runtime INTEGER NULL,
+    status TEXT NULL,
+    release_date TEXT NULL,
+    genres_json TEXT NULL,
+    companies_json TEXT NULL,
+    countries_json TEXT NULL,
+    original_language TEXT NULL,
+    vote_average REAL NULL,
+    vote_count INTEGER NULL,
+    poster_path TEXT NULL,
+    backdrop_path TEXT NULL,
+    homepage TEXT NULL,
+    payload_json TEXT NULL,
+    source TEXT NOT NULL DEFAULT 'unknown',
+    fetched_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(media_type, tmdb_id)
+);
+
+CREATE TABLE IF NOT EXISTS metadata_jobs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    status TEXT NOT NULL DEFAULT 'queued' CHECK(status IN ('queued','running','completed','failed')),
+    current_item INTEGER NOT NULL DEFAULT 0,
+    total_items INTEGER NOT NULL DEFAULT 0,
+    current_title TEXT NULL,
+    message TEXT NULL,
+    started_at TEXT NULL,
+    finished_at TEXT NULL,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS shared_tmdb_cache (
+    cache_key TEXT PRIMARY KEY,
+    payload_json TEXT NOT NULL,
+    fetched_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS shared_tmdb_usage (
+    usage_key TEXT NOT NULL,
+    usage_month TEXT NOT NULL,
+    request_count INTEGER NOT NULL DEFAULT 0,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY(usage_key, usage_month)
+);
+
 CREATE TABLE IF NOT EXISTS sync_jobs (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     instance_id INTEGER NOT NULL,
@@ -159,6 +216,8 @@ CREATE INDEX IF NOT EXISTS idx_episodes_series ON episodes(series_id, season_num
 CREATE INDEX IF NOT EXISTS idx_episodes_instance_remote ON episodes(instance_id, remote_id);
 CREATE INDEX IF NOT EXISTS idx_episodes_airdate ON episodes(air_date_utc);
 CREATE INDEX IF NOT EXISTS idx_episodes_missing ON episodes(has_file, monitored);
+CREATE INDEX IF NOT EXISTS idx_media_metadata_tmdb ON media_metadata(media_type, tmdb_id);
+CREATE INDEX IF NOT EXISTS idx_metadata_jobs_created ON metadata_jobs(id DESC);
 SQL);
 
         // Lightweight migration for installations created before series audio tracking.
@@ -187,9 +246,22 @@ SQL);
             $setToken->execute([bin2hex(random_bytes(24)), (int)$row['id']]);
         }
 
+        $installId = $this->pdo->prepare("SELECT setting_value FROM app_settings WHERE setting_key='installation_id' LIMIT 1");
+        $installId->execute();
+        if (!(string)$installId->fetchColumn()) {
+            $this->pdo->prepare('INSERT INTO app_settings(setting_key,setting_value) VALUES(?,?)')
+                ->execute(['installation_id', bin2hex(random_bytes(16))]);
+        }
+
         $movieColumnNames = array_column($this->pdo->query('PRAGMA table_info(movies)')->fetchAll(), 'name');
         if (!in_array('details_json', $movieColumnNames, true)) {
             $this->pdo->exec('ALTER TABLE movies ADD COLUMN details_json TEXT NULL');
+        }
+        if (!in_array('tmdb_id', $movieColumnNames, true)) {
+            $this->pdo->exec('ALTER TABLE movies ADD COLUMN tmdb_id INTEGER NULL');
+        }
+        if (!in_array('imdb_id', $movieColumnNames, true)) {
+            $this->pdo->exec('ALTER TABLE movies ADD COLUMN imdb_id TEXT NULL');
         }
 
         $seriesColumnNames = array_column($this->pdo->query('PRAGMA table_info(series)')->fetchAll(), 'name');
@@ -198,10 +270,15 @@ SQL);
             'future_missing_count' => 'INTEGER NOT NULL DEFAULT 0',
             'missing_audio_count' => 'INTEGER NOT NULL DEFAULT 0',
             'details_json' => 'TEXT NULL',
+            'tmdb_id' => 'INTEGER NULL',
+            'imdb_id' => 'TEXT NULL',
         ] as $name => $definition) {
             if (!in_array($name, $seriesColumnNames, true)) {
                 $this->pdo->exec("ALTER TABLE series ADD COLUMN {$name} {$definition}");
             }
         }
+
+        $this->pdo->exec('CREATE INDEX IF NOT EXISTS idx_movies_tmdb ON movies(tmdb_id)');
+        $this->pdo->exec('CREATE INDEX IF NOT EXISTS idx_series_tmdb ON series(tmdb_id)');
     }
 }

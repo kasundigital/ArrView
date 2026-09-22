@@ -8,7 +8,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $action = $_POST['action'] ?? '';
     try {
         $auth->requireCsrf($_POST['csrf_token'] ?? null);
-        if ($action === 'save_public_link') {
+        if ($action === 'save_metadata') {
+            $mode = (string)($_POST['metadata_mode'] ?? 'free');
+            $key = trim((string)($_POST['tmdb_api_key'] ?? ''));
+            $metadata->saveSettings($mode, $key !== '' ? $key : null);
+            $message = $mode === 'personal'
+                ? 'Personal TMDB metadata mode saved.'
+                : 'ArrView Free Metadata mode enabled.';
+        } elseif ($action === 'remove_tmdb_key') {
+            $metadata->removePersonalKey();
+            $message = 'Personal TMDB key removed. ArrView Free Metadata is active.';
+        } elseif ($action === 'test_metadata') {
+            $result = $metadata->testConnection();
+            $message = $result['message'] ?? 'TMDB metadata connection successful.';
+        } elseif ($action === 'save_public_link') {
             $localRoot = trim($_POST['public_local_root'] ?? '');
             $baseUrl = trim($_POST['public_base_url'] ?? '');
             if ($baseUrl !== '' && !preg_match('#^https?://#i', $baseUrl)) {
@@ -47,6 +60,9 @@ foreach ($pdo->query("SELECT setting_key,setting_value FROM app_settings WHERE s
 }
 $publicLocalRoot = $settings['public_local_root'] ?? '';
 $publicBaseUrl = $settings['public_base_url'] ?? '';
+$metadataSettings = $metadata->settings();
+$metadataStats = $metadata->stats();
+$hasPersonalTmdbKey = $metadataSettings['tmdb_api_key'] !== '';
 $forwardedProto = strtolower(trim(explode(',', (string)($_SERVER['HTTP_X_FORWARDED_PROTO'] ?? ''))[0] ?? ''));
 $scheme = in_array($forwardedProto, ['http','https'], true)
     ? $forwardedProto
@@ -58,6 +74,57 @@ $baseAppUrl = $scheme . '://' . $host;
 <header class="topbar"><a class="brand" href="/">ArrView <small class="version-chip">v<?=e(ARRVIEW_VERSION)?></small></a><nav><a href="/">Library</a><a class="active" href="/admin.php">Instances</a><a href="/users.php">Users</a><a href="/support.php">Support</a><span class="user-chip"><?=e($currentUser['username'])?></span><a href="/logout.php">Logout</a></nav></header>
 <main class="wrap admin-wrap"><section class="catalog-head"><div><p class="eyebrow">SETTINGS</p><h1>Instances</h1></div></section>
 <?php if($message):?><div class="notice success"><?=e($message)?></div><?php endif;?><?php if($error):?><div class="notice error"><?=e($error)?></div><?php endif;?>
+<section class="panel metadata-panel">
+  <div class="panel-heading-inline metadata-panel-head">
+    <div><p class="eyebrow">METADATA</p><h2>TMDB Metadata</h2></div>
+    <span class="instance-count"><?=e(ucfirst($metadataSettings['mode']))?> mode</span>
+  </div>
+  <p class="muted">ArrView caches TMDB metadata locally. Normal movie/series pages read SQLite only. Use the free ArrView metadata service by default, or add your own TMDB credential for large libraries and heavier usage.</p>
+
+  <form method="post" class="metadata-settings-form">
+    <?=csrf_field()?>
+    <input type="hidden" name="action" value="save_metadata">
+    <label class="metadata-mode-card">
+      <input type="radio" name="metadata_mode" value="free" <?=$metadataSettings['mode']==='free'?'checked':''?>>
+      <span><strong>ArrView Free Metadata</strong><small>No TMDB key required. Shared cached service with a fair-use monthly quota.</small></span>
+    </label>
+    <label class="metadata-mode-card">
+      <input type="radio" name="metadata_mode" value="personal" <?=$metadataSettings['mode']==='personal'?'checked':''?>>
+      <span><strong>Use my own TMDB key</strong><small>Best for very large libraries or higher usage. The credential stays server-side.</small></span>
+    </label>
+    <label class="metadata-key-field">TMDB API Key / Bearer Token
+      <input name="tmdb_api_key" type="password" autocomplete="off" placeholder="<?=$hasPersonalTmdbKey?'Personal key saved — leave blank to keep it':'Paste TMDB API key or bearer token'?>">
+    </label>
+    <div class="metadata-actions">
+      <button class="primary" type="submit">Save Metadata Settings</button>
+    </div>
+  </form>
+
+  <div class="metadata-stats">
+    <div><span>Movies cached</span><strong><?=number_format($metadataStats['movies_cached'])?></strong></div>
+    <div><span>Series cached</span><strong><?=number_format($metadataStats['series_cached'])?></strong></div>
+    <div><span>Movies pending</span><strong><?=number_format($metadataStats['pending_movies'])?></strong></div>
+    <div><span>Series pending</span><strong><?=number_format($metadataStats['pending_series'])?></strong></div>
+  </div>
+
+  <div class="metadata-toolbar">
+    <form method="post"><?=csrf_field()?><input type="hidden" name="action" value="test_metadata"><button type="submit">Test Metadata</button></form>
+    <?php if($hasPersonalTmdbKey):?><form method="post" onsubmit="return confirm('Remove your personal TMDB key and return to ArrView Free Metadata?')"><?=csrf_field()?><input type="hidden" name="action" value="remove_tmdb_key"><button type="submit">Remove Personal Key</button></form><?php endif;?>
+    <button type="button" class="primary metadata-sync-btn">Enrich Metadata</button>
+  </div>
+
+  <div class="metadata-progress sync-progress" hidden>
+    <div class="sync-progress-head"><strong class="metadata-count">0 / 0</strong><span class="metadata-percent">0%</span></div>
+    <div class="sync-track"><div class="sync-fill metadata-fill" style="width:0%"></div></div>
+    <div class="metadata-current sync-current">Preparing metadata enrichment...</div>
+  </div>
+
+  <div class="metadata-attribution">
+    <strong>TMDB Attribution</strong>
+    <p>This product uses the TMDB API but is not endorsed or certified by TMDB.</p>
+  </div>
+</section>
+
 <section class="panel"><h2>Add Radarr / Sonarr</h2><form method="post" class="instance-form"><?=csrf_field()?> <input type="hidden" name="action" value="add"><label>Name<input name="name" placeholder="Radarr Main" required></label><label>Type<select name="type"><option value="radarr">Radarr</option><option value="sonarr">Sonarr</option></select></label><label>URL<input name="url" placeholder="http://192.168.1.10:7878" required></label><label>API Key<input name="api_key" type="password" placeholder="API key" required></label><button class="primary" type="submit">Add Instance</button></form></section>
 <section class="panel"><h2>Public / VOD Link</h2>
 <p class="muted">Map your local media path to a public streaming URL. ArrView will URL-encode folders and filenames automatically and show Open/Copy links on media details pages.</p>
@@ -161,6 +228,29 @@ for(const button of document.querySelectorAll('.sync-btn')){
     }catch(e){button.disabled=false;button.textContent='Retry Sync';row.querySelector('.sync-current').textContent=e.message||'Could not start sync';box.classList.add('failed');}
   });
 }
+const metadataButton=document.querySelector('.metadata-sync-btn');
+if(metadataButton){
+  metadataButton.addEventListener('click',async()=>{
+    const box=document.querySelector('.metadata-progress'),count=document.querySelector('.metadata-count'),percent=document.querySelector('.metadata-percent'),fill=document.querySelector('.metadata-fill'),current=document.querySelector('.metadata-current');
+    box.hidden=false; metadataButton.disabled=true; metadataButton.textContent='Enriching...';
+    try{
+      const body=new URLSearchParams({csrf_token:'<?=e($auth->csrfToken())?>'});
+      const start=await fetch('/metadata-start.php',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body});
+      const started=await start.json(); if(!started.ok) throw new Error(started.message||'Could not start metadata enrichment');
+      while(true){
+        const r=await fetch('/metadata-status.php?job_id='+encodeURIComponent(started.job_id),{cache:'no-store'});
+        const d=await r.json(); if(!d.ok) throw new Error(d.message||'Unable to read metadata status');
+        const n=Number(d.current||0),t=Number(d.total||0),p=Math.max(0,Math.min(100,Number(d.percent||0)));
+        count.textContent=t>0?`${n.toLocaleString()} / ${t.toLocaleString()}`:`${n.toLocaleString()} items`;
+        percent.textContent=p.toFixed(p%1?1:0)+'%'; fill.style.width=p+'%'; current.textContent=d.title||d.message||'Working...';
+        if(d.status==='completed'){metadataButton.disabled=false;metadataButton.textContent='Enrich Again';current.textContent=d.message||'Metadata enrichment completed';break;}
+        if(d.status==='failed'){metadataButton.disabled=false;metadataButton.textContent='Retry Enrichment';box.classList.add('failed');current.textContent=d.message||'Metadata enrichment failed';break;}
+        await sleep(800);
+      }
+    }catch(e){metadataButton.disabled=false;metadataButton.textContent='Retry Enrichment';current.textContent=e.message||'Metadata enrichment failed';box.classList.add('failed');}
+  });
+}
+
 document.querySelectorAll('.copy-webhook-btn').forEach(button=>{
   button.addEventListener('click',async()=>{
     const original=button.textContent;

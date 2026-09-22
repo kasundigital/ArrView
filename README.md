@@ -11,7 +11,7 @@
 <p align="center">
   <a href="https://github.com/kasundigital/ArrView/stargazers"><img alt="GitHub Stars" src="https://img.shields.io/github/stars/kasundigital/ArrView?style=for-the-badge"></a>
   <a href="https://github.com/kasundigital/ArrView/pkgs/container/arrview"><img alt="GHCR" src="https://img.shields.io/badge/GHCR-arrview-blue?style=for-the-badge&logo=docker"></a>
-  <a href="https://github.com/kasundigital/ArrView"><img alt="Version" src="https://img.shields.io/badge/version-v0.10.1-7c9cff?style=for-the-badge"></a>
+  <a href="https://github.com/kasundigital/ArrView"><img alt="Version" src="https://img.shields.io/badge/version-v0.11.0-7c9cff?style=for-the-badge"></a>
   <a href="https://buymeacoffee.com/kasundigital"><img alt="Buy Me a Coffee" src="https://img.shields.io/badge/Buy%20Me%20a%20Coffee-Support%20ArrView-FFDD00?style=for-the-badge&logo=buymeacoffee&logoColor=000000"></a>
 </p>
 
@@ -155,6 +155,34 @@ Use more than one:
 - Sonarr
 
 You can also filter the library by a specific instance.
+
+---
+
+
+## 🎞️ TMDB Metadata
+
+ArrView can enrich cached Radarr/Sonarr records with TMDB metadata while keeping normal browsing database-first.
+
+- **ArrView Free Metadata** is the default mode and does not require each user to enter a TMDB key.
+- Metadata returned by the free service is cached in local SQLite, so opening a movie or series does not repeatedly call TMDB.
+- Users with very large libraries can switch to **Use my own TMDB key** in Admin.
+- Personal TMDB credentials stay server-side and are never inserted into browser JavaScript.
+- Background metadata enrichment shows progress and can process large libraries gradually.
+- Radarr/Sonarr webhooks refresh the affected movie/series metadata automatically when possible.
+- Movie and series pages show TMDB and IMDb links plus cached overview, runtime, genres, production/network, language, release date and rating.
+
+The public/free metadata service is served by the official ArrView host. The official service host must set:
+
+```text
+ARRVIEW_SHARED_TMDB_BEARER_TOKEN=<server-side TMDB bearer token>
+ARRVIEW_FREE_METADATA_MONTHLY_LIMIT=1000
+```
+
+Normal ArrView installations do **not** need those variables. They use the shared service automatically, or can provide their own TMDB credential from the Admin UI.
+
+TMDB attribution:
+
+> This product uses the TMDB API but is not endorsed or certified by TMDB.
 
 ---
 

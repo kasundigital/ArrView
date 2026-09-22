@@ -17,6 +17,14 @@ if (!$series) {
     exit('Series not found.');
 }
 
+$rawSeries = [];
+if (!empty($series['details_json'])) {
+    $decodedSeries = json_decode((string)$series['details_json'], true);
+    if (is_array($decodedSeries)) $rawSeries = $decodedSeries;
+}
+$tmdbId = (int)($series['tmdb_id'] ?? $rawSeries['tmdbId'] ?? 0);
+$tmdb = $tmdbId > 0 ? $metadata->cached('series', $tmdbId) : null;
+
 $episodeStmt = $pdo->prepare('SELECT * FROM episodes WHERE series_id=? ORDER BY season_number, episode_number');
 $episodeStmt->execute([$id]);
 $episodes = $episodeStmt->fetchAll();
@@ -97,19 +105,44 @@ $languageNames=array_keys($languages);natcasesort($languageNames);
       <span class="detail-chip"><?=(int)$series['monitored']?'Monitored':'Not monitored'?></span>
       <span class="detail-chip"><?=e($series['instance_name'])?></span>
     </div>
-    <p class="meta"><?=number_format($available)?> / <?=number_format($total)?> cached episodes have files · Audio: <?=e($languageNames?implode(', ',$languageNames):'Unknown')?></p>
-    <div class="detail-actions"><a class="table-action" href="<?=e(rtrim($series['instance_url'],'/'))?>" target="_blank" rel="noopener noreferrer">Open Sonarr ↗</a></div>
+    <?php if(!empty($tmdb['overview'])):?><p class="movie-overview"><?=e($tmdb['overview'])?></p><?php endif;?>
+    <p class="meta"><?=number_format($available)?> / <?=number_format($total)?> episodes have files · Audio: <?=e($languageNames?implode(', ',$languageNames):'Unknown')?></p>
+    <div class="detail-actions">
+      <a class="table-action" href="<?=e(rtrim($series['instance_url'],'/'))?>" target="_blank" rel="noopener noreferrer">Open Sonarr ↗</a>
+      <?php if($tmdbId>0):?><a class="table-action tmdb-link" href="https://www.themoviedb.org/tv/<?=$tmdbId?>" target="_blank" rel="noopener noreferrer">TMDB #<?=$tmdbId?> ↗</a><?php endif;?>
+      <?php if(!empty($tmdb['imdb_id'])):?><a class="table-action" href="https://www.imdb.com/title/<?=e($tmdb['imdb_id'])?>/" target="_blank" rel="noopener noreferrer">IMDb ↗</a><?php endif;?>
+    </div>
   </div>
 </section>
 
 <section class="detail-grid">
 <div class="detail-card"><span>Seasons</span><strong><?=number_format(count($seasons))?></strong></div>
-<div class="detail-card"><span>Cached Episodes</span><strong><?=number_format($total)?></strong></div>
+<div class="detail-card"><span>Episodes</span><strong><?=number_format($total)?></strong></div>
 <div class="detail-card"><span>Available</span><strong><?=number_format($available)?></strong></div>
 <div class="detail-card"><span>Aired Missing</span><strong><?=number_format($airedMissing)?></strong></div>
 <div class="detail-card"><span>Missing Audio Info</span><strong><?=number_format($languageIssues)?></strong></div>
 <div class="detail-card"><span>Audio Languages</span><strong><?=e($languageNames?implode(', ',$languageNames):'Unknown')?></strong></div>
 </section>
+
+<?php if($tmdbId>0):?>
+<section class="panel tmdb-panel">
+  <div class="panel-heading-inline"><div><p class="eyebrow">TMDB METADATA</p><h2>Series information</h2></div><span class="type-pill sonarr">TMDB #<?=$tmdbId?></span></div>
+  <?php if($tmdb):?>
+  <dl class="detail-list metadata-detail-list">
+    <div><dt>Original title</dt><dd><?=e($tmdb['original_title'] ?: '—')?></dd></div>
+    <div><dt>First air date</dt><dd><?=e($tmdb['release_date'] ?: '—')?></dd></div>
+    <div><dt>Status</dt><dd><?=e($tmdb['status'] ?: '—')?></dd></div>
+    <div><dt>Genres</dt><dd><?=e(!empty($tmdb['genres']) ? implode(', ', array_values(array_filter(array_map(fn($x)=>is_array($x)?($x['name']??null):null,$tmdb['genres'])))) : '—')?></dd></div>
+    <div><dt>Network / Production</dt><dd><?=e(!empty($tmdb['companies']) ? implode(', ', array_values(array_filter(array_map(fn($x)=>is_array($x)?($x['name']??null):null,$tmdb['companies'])))) : '—')?></dd></div>
+    <div><dt>Original language</dt><dd><?=e(strtoupper((string)($tmdb['original_language'] ?: '—')))?></dd></div>
+    <div><dt>TMDB rating</dt><dd><?=!empty($tmdb['vote_count'])?e(number_format((float)$tmdb['vote_average'],1)).' / 10 · '.number_format((int)$tmdb['vote_count']).' votes':'—'?></dd></div>
+    <div><dt>Metadata source</dt><dd><?=e($tmdb['source'] ?? 'TMDB')?> · cached <?=e(seriesDate($tmdb['fetched_at'] ?? null))?></dd></div>
+  </dl>
+  <?php else:?>
+  <div class="metadata-empty"><strong>TMDB ID found, metadata not cached yet.</strong><p>Run <b>Admin → TMDB Metadata → Enrich Metadata</b>. ArrView will save it locally and normal browsing will stay database-only.</p></div>
+  <?php endif;?>
+</section>
+<?php endif;?>
 
 <?php if(!$episodes):?>
 <div class="empty"><h2>No cached episodes</h2><p>Run a fresh Sonarr sync from Admin to populate seasons and episodes.</p></div>

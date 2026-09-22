@@ -8,6 +8,11 @@ services:
     environment:
       TZ: ${TZ:-Asia/Colombo}
       ARRVIEW_DATA: /app/data
+      # Optional override for the shared free metadata service:
+      ARRVIEW_METADATA_API_URL: ${ARRVIEW_METADATA_API_URL:-https://arrview.dashboards420.com/metadata-api.php}
+      # Only set these on the official ArrView metadata service host, never on normal clients:
+      ARRVIEW_SHARED_TMDB_BEARER_TOKEN: ${ARRVIEW_SHARED_TMDB_BEARER_TOKEN:-}
+      ARRVIEW_FREE_METADATA_MONTHLY_LIMIT: ${ARRVIEW_FREE_METADATA_MONTHLY_LIMIT:-1000}
     volumes:
       - arrview-data:/app/data
 
