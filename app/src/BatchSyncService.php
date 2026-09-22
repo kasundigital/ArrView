@@ -323,10 +323,10 @@ SQL;
         $movieFile = is_array($movie['movieFile'] ?? null) ? $movie['movieFile'] : null;
 
         $sql = <<<'SQL'
-INSERT INTO movies (instance_id, remote_id, title, year, poster_url, has_file, monitored, quality, audio_languages, path, file_size, details_json, updated_at)
-VALUES (:instance_id, :remote_id, :title, :year, :poster_url, :has_file, :monitored, :quality, :audio_languages, :path, :file_size, :details_json, CURRENT_TIMESTAMP)
+INSERT INTO movies (instance_id, remote_id, tmdb_id, imdb_id, title, year, poster_url, has_file, monitored, quality, audio_languages, path, file_size, details_json, updated_at)
+VALUES (:instance_id, :remote_id, :tmdb_id, :imdb_id, :title, :year, :poster_url, :has_file, :monitored, :quality, :audio_languages, :path, :file_size, :details_json, CURRENT_TIMESTAMP)
 ON CONFLICT(instance_id, remote_id) DO UPDATE SET
- title=excluded.title, year=excluded.year, poster_url=excluded.poster_url,
+ tmdb_id=excluded.tmdb_id, imdb_id=excluded.imdb_id, title=excluded.title, year=excluded.year, poster_url=excluded.poster_url,
  has_file=excluded.has_file, monitored=excluded.monitored, quality=excluded.quality,
  audio_languages=excluded.audio_languages, path=excluded.path, file_size=excluded.file_size,
  details_json=excluded.details_json, updated_at=CURRENT_TIMESTAMP
