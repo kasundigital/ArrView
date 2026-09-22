@@ -49,7 +49,7 @@ function dateLabel(?string $date): string {
     }
 }
 
-$tmdbId = (int)($rawMovie['tmdbId'] ?? 0);
+$tmdbId = (int)($cached['tmdb_id'] ?? $rawMovie['tmdbId'] ?? 0);
 $tmdb = $tmdbId > 0 ? $metadata->cached('movie', $tmdbId) : null;
 $rawFile = is_array($rawMovie['movieFile'] ?? null) ? $rawMovie['movieFile'] : null;
 $mediaInfo = is_array($rawFile['mediaInfo'] ?? null) ? $rawFile['mediaInfo'] : [];
