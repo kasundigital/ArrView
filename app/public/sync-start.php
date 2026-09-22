@@ -21,6 +21,12 @@ if (!$instance) {
     exit;
 }
 
+// Recover automatically from worker crashes so an old job cannot block Sync Now forever.
+$pdo->prepare("UPDATE sync_jobs SET status='failed',message='Stale sync job recovered automatically',finished_at=CURRENT_TIMESTAMP
+ WHERE instance_id=? AND status IN ('queued','running')
+ AND datetime(COALESCE(started_at,created_at)) < datetime('now','-6 hours')")
+    ->execute([$instanceId]);
+
 $active = $pdo->prepare("SELECT id FROM sync_jobs WHERE instance_id=? AND status IN ('queued','running') ORDER BY id DESC LIMIT 1");
 $active->execute([$instanceId]);
 $existing = $active->fetchColumn();
@@ -33,6 +39,14 @@ $pdo->prepare("INSERT INTO sync_jobs(instance_id,status,message) VALUES(?, 'queu
 $jobId = (int)$pdo->lastInsertId();
 
 $cmd = escapeshellarg(PHP_BINARY) . ' ' . escapeshellarg(dirname(__DIR__) . '/bin/sync-job.php') . ' ' . $jobId . ' > /tmp/arrview-sync-' . $jobId . '.log 2>&1 &';
-exec($cmd);
+$output = [];
+$exitCode = 0;
+exec($cmd, $output, $exitCode);
+if ($exitCode !== 0) {
+    $pdo->prepare("UPDATE sync_jobs SET status='failed',message='Could not launch background sync worker',finished_at=CURRENT_TIMESTAMP WHERE id=?")->execute([$jobId]);
+    http_response_code(500);
+    echo json_encode(['ok'=>false,'message'=>'Could not launch background sync worker']);
+    exit;
+}
 
 echo json_encode(['ok'=>true,'job_id'=>$jobId]);
