@@ -253,6 +253,17 @@ SQL);
                 ->execute(['installation_id', bin2hex(random_bytes(16))]);
         }
 
+        // TMDB metadata must always have a safe default. Existing installations
+        // upgrading from versions before metadata support start in free mode.
+        $metadataModeStmt = $this->pdo->prepare("SELECT setting_value FROM app_settings WHERE setting_key='metadata_mode' LIMIT 1");
+        $metadataModeStmt->execute();
+        $metadataMode = (string)($metadataModeStmt->fetchColumn() ?: '');
+        if (!in_array($metadataMode, ['free','personal'], true)) {
+            $this->pdo->prepare(
+                'INSERT INTO app_settings(setting_key,setting_value) VALUES(?,?) ON CONFLICT(setting_key) DO UPDATE SET setting_value=excluded.setting_value'
+            )->execute(['metadata_mode', 'free']);
+        }
+
         $movieColumnNames = array_column($this->pdo->query('PRAGMA table_info(movies)')->fetchAll(), 'name');
         if (!in_array('details_json', $movieColumnNames, true)) {
             $this->pdo->exec('ALTER TABLE movies ADD COLUMN details_json TEXT NULL');
