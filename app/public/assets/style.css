@@ -32,3 +32,11 @@
 .webhook-box>span{font-size:9px;font-weight:850;letter-spacing:.8px;text-transform:uppercase;color:#9eabc0}
 .webhook-box code{font:11px ui-monospace,SFMono-Regular,Menlo,monospace;color:#b8c8ff;overflow-wrap:anywhere;user-select:all}
 .webhook-box small{font-size:10px;line-height:1.45;color:#7f8da2}
+
+/* v0.9.2 ArrView branding */
+.brand-logo{display:inline-flex!important;align-items:center;gap:9px;line-height:1;text-decoration:none}
+.brand-logo>img{width:30px;height:30px;object-fit:contain;flex:0 0 auto}
+.brand-word{font-weight:900;letter-spacing:-.7px;color:#f7f9fc}
+.brand-word>span{color:#24cfe8}
+.auth-logo{display:block;width:min(300px,82%);height:auto;margin:0 0 26px}
+@media(max-width:680px){.brand-logo>img{width:27px;height:27px}.brand-word{font-size:17px}.auth-logo{width:min(250px,82%)}}
