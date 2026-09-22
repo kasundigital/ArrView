@@ -19,6 +19,10 @@ if (!in_array($filter, $validFilters, true)) $filter = 'all';
 $movieCount = (int)$pdo->query('SELECT COUNT(*) FROM movies')->fetchColumn();
 $seriesCount = (int)$pdo->query('SELECT COUNT(*) FROM series')->fetchColumn();
 $instanceCount = (int)$pdo->query('SELECT COUNT(*) FROM instances WHERE enabled=1')->fetchColumn();
+$missingMovieCount = (int)$pdo->query('SELECT COUNT(*) FROM movies WHERE has_file=0')->fetchColumn();
+$availableMovieCount = (int)$pdo->query('SELECT COUNT(*) FROM movies WHERE has_file=1')->fetchColumn();
+$incompleteSeriesCount = (int)$pdo->query('SELECT COUNT(*) FROM series WHERE episode_file_count < episode_count')->fetchColumn();
+$airedMissingSeriesCount = (int)$pdo->query('SELECT COUNT(*) FROM series WHERE aired_missing_count>0')->fetchColumn();
 
 $instances = [];
 $years = [];
@@ -182,16 +186,46 @@ function sortIndicator(string $sortBy, string $sortDir, string $column): string
 
 <main class="wrap compact-library">
 <?php if(!$type):?>
-    <section class="hero">
-        <p class="eyebrow">RADARR + SONARR LIBRARY VIEW</p>
-        <h1>Find what is missing.</h1>
-        <p>Compact library monitoring focused on file availability, audio language and missing-download diagnostics.</p>
+    <section class="dashboard-hero">
+        <div>
+            <p class="eyebrow">ARRVIEW DASHBOARD</p>
+            <h1>Media overview</h1>
+            <p>Quickly see library health, missing media and connected Radarr/Sonarr services.</p>
+        </div>
+        <span class="dashboard-instance-chip"><?=$instanceCount?> enabled instance<?=$instanceCount===1?'':'s'?></span>
     </section>
-    <section class="chooser">
-        <a class="choice" href="/?type=movies"><div class="choice-icon">🎬</div><div><span>Radarr</span><h2>Movies</h2><p><?=$movieCount?> indexed movies</p></div></a>
-        <a class="choice" href="/?type=series"><div class="choice-icon">📺</div><div><span>Sonarr</span><h2>TV Series</h2><p><?=$seriesCount?> indexed series</p></div></a>
+
+    <section class="dashboard-stats" aria-label="Library summary">
+        <a class="dashboard-stat" href="/?type=movies">
+            <span class="dashboard-stat-icon">🎬</span>
+            <div><small>Movies</small><strong><?=number_format($movieCount)?></strong><span><?=number_format($availableMovieCount)?> available</span></div>
+        </a>
+        <a class="dashboard-stat alert" href="/?type=movies&filter=missing">
+            <span class="dashboard-stat-icon">!</span>
+            <div><small>Missing Movies</small><strong><?=number_format($missingMovieCount)?></strong><span>Needs attention</span></div>
+        </a>
+        <a class="dashboard-stat" href="/?type=series">
+            <span class="dashboard-stat-icon">📺</span>
+            <div><small>TV Series</small><strong><?=number_format($seriesCount)?></strong><span><?=number_format($incompleteSeriesCount)?> incomplete</span></div>
+        </a>
+        <a class="dashboard-stat warning" href="/?type=series&filter=airedmissing">
+            <span class="dashboard-stat-icon">↳</span>
+            <div><small>Aired Missing</small><strong><?=number_format($airedMissingSeriesCount)?></strong><span>Series with aired gaps</span></div>
+        </a>
     </section>
-    <p class="muted center"><?=$instanceCount?> enabled instance<?=$instanceCount===1?'':'s'?></p>
+
+    <section class="dashboard-launch">
+        <a class="dashboard-launch-card" href="/?type=movies">
+            <div class="launch-icon">🎬</div>
+            <div><span>Radarr</span><h2>Movies</h2><p>Browse availability, audio language, quality and missing-download diagnostics.</p></div>
+            <b>Open →</b>
+        </a>
+        <a class="dashboard-launch-card" href="/?type=series">
+            <div class="launch-icon">📺</div>
+            <div><span>Sonarr</span><h2>Series</h2><p>Browse seasons, episodes, aired missing items and audio information.</p></div>
+            <b>Open →</b>
+        </a>
+    </section>
 <?php else:?>
     <section class="compact-head">
         <div>
