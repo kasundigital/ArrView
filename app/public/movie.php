@@ -26,12 +26,10 @@ $instance = [
     'api_key' => $cached['api_key'],
 ];
 
-$error = null;
-$details = null;
-try {
-    $details = $arr->movieDetails($instance, (int)$cached['remote_id']);
-} catch (Throwable $e) {
-    $error = $e->getMessage();
+$rawMovie = [];
+if (!empty($cached['details_json'])) {
+    $decoded = json_decode((string)$cached['details_json'], true);
+    if (is_array($decoded)) $rawMovie = $decoded;
 }
 
 function movieBytes(?int $bytes): string {
@@ -51,13 +49,43 @@ function dateLabel(?string $date): string {
     }
 }
 
-$movie = $details['movie'] ?? [
-    'title'=>$cached['title'], 'year'=>$cached['year'], 'poster_url'=>$cached['poster_url'],
-    'monitored'=>(bool)$cached['monitored'], 'has_file'=>(bool)$cached['has_file'], 'path'=>$cached['path']
+$rawFile = is_array($rawMovie['movieFile'] ?? null) ? $rawMovie['movieFile'] : null;
+$mediaInfo = is_array($rawFile['mediaInfo'] ?? null) ? $rawFile['mediaInfo'] : [];
+$movie = [
+    'title'=>$rawMovie['title'] ?? $cached['title'],
+    'original_title'=>$rawMovie['originalTitle'] ?? null,
+    'title_slug'=>$rawMovie['titleSlug'] ?? null,
+    'year'=>$rawMovie['year'] ?? $cached['year'],
+    'poster_url'=>$cached['poster_url'],
+    'monitored'=>(bool)($rawMovie['monitored'] ?? $cached['monitored']),
+    'has_file'=>(bool)($rawMovie['hasFile'] ?? $cached['has_file']),
+    'path'=>$rawMovie['path'] ?? $cached['path'],
+    'status'=>$rawMovie['status'] ?? null,
+    'overview'=>$rawMovie['overview'] ?? null,
+    'runtime'=>$rawMovie['runtime'] ?? null,
+    'studio'=>$rawMovie['studio'] ?? null,
 ];
-$file = $details['file'] ?? null;
-$timeline = $details['timeline'] ?? [];
-$history = $details['history'] ?? [];
+$file = $rawFile ? [
+    'path'=>$rawFile['path'] ?? (($movie['path'] ?? '') && !empty($rawFile['relativePath']) ? rtrim((string)$movie['path'],'/\\') . '/' . ltrim((string)$rawFile['relativePath'],'/\\') : null),
+    'relative_path'=>$rawFile['relativePath'] ?? null,
+    'size'=>$rawFile['size'] ?? $cached['file_size'],
+    'quality'=>$rawFile['quality']['quality']['name'] ?? $cached['quality'],
+    'languages'=>$cached['audio_languages'],
+    'date_added'=>$rawFile['dateAdded'] ?? null,
+    'release_group'=>$rawFile['releaseGroup'] ?? null,
+    'scene_name'=>$rawFile['sceneName'] ?? null,
+    'video_codec'=>$mediaInfo['videoCodec'] ?? null,
+    'video_resolution'=>$mediaInfo['resolution'] ?? $mediaInfo['videoResolution'] ?? null,
+    'audio_codec'=>$mediaInfo['audioCodec'] ?? null,
+    'audio_channels'=>$mediaInfo['audioChannels'] ?? null,
+] : null;
+$timeline = [
+    'added_to_radarr'=>$rawMovie['added'] ?? null,
+    'grabbed_at'=>null,
+    'imported_at'=>null,
+    'file_added_at'=>$rawFile['dateAdded'] ?? null,
+];
+$history = [];
 
 $settings = [];
 foreach ($pdo->query("SELECT setting_key,setting_value FROM app_settings WHERE setting_key IN ('public_local_root','public_base_url')")->fetchAll() as $row) {
@@ -109,7 +137,7 @@ $publicMediaUrl = buildPublicMediaUrl($file['path'] ?? null, $publicLocalRoot, $
 <main class="wrap movie-detail-wrap">
     <div class="detail-back"><a href="/?type=movies">← Back to Movies</a></div>
 
-    <?php if($error):?><div class="notice error">Live Radarr details could not be loaded: <?=e($error)?>. Showing cached ArrView data where available.</div><?php endif;?>
+    <div class="notice info">Showing locally cached ArrView data. Radarr is contacted only during sync, webhook updates, or diagnostics.</div>
 
     <section class="movie-hero">
         <div class="movie-detail-poster">
