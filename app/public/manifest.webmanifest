@@ -1,0 +1,17 @@
+{
+  "name": "ArrView",
+  "short_name": "ArrView",
+  "description": "Radarr and Sonarr library monitor and diagnostics dashboard",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#080d15",
+  "theme_color": "#0b111c",
+  "icons": [
+    {
+      "src": "/assets/arrview-icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
