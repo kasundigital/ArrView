@@ -453,3 +453,6 @@ html[data-theme="light"] .sync-history-row{background:#f8fafc;color:#172033;bord
   .episode-table tbody tr{grid-template-columns:1fr}
   .episode-table tbody td:nth-child(2),.episode-table tbody td.action-cell{grid-column:auto}
 }
+
+.nav-logout{margin:0;display:inline-flex}.nav-logout button{border:0;background:transparent;color:var(--muted);padding:7px 0;font:inherit;cursor:pointer}.nav-logout button:hover{color:var(--text)}
+@media(max-width:720px){.topbar nav .nav-logout{width:100%}.topbar nav .nav-logout button{width:100%;min-height:40px;text-align:left;padding:8px 10px;border-radius:8px}.topbar nav .nav-logout button:hover{background:rgba(124,156,255,.08)}}
