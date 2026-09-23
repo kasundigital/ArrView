@@ -205,6 +205,7 @@ CREATE TABLE IF NOT EXISTS metadata_jobs (
     source TEXT NOT NULL DEFAULT 'manual',
     cancel_requested INTEGER NOT NULL DEFAULT 0,
     started_at TEXT NULL,
+    heartbeat_at TEXT NULL,
     finished_at TEXT NULL,
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
@@ -374,6 +375,11 @@ SQL);
             // Older SQLite builds without JSON functions can wait for the next Radarr sync.
         }
 
+
+        $metadataJobColumnNames = array_column($this->pdo->query('PRAGMA table_info(metadata_jobs)')->fetchAll(), 'name');
+        if (!in_array('heartbeat_at', $metadataJobColumnNames, true)) {
+            $this->pdo->exec('ALTER TABLE metadata_jobs ADD COLUMN heartbeat_at TEXT NULL');
+        }
 
         $syncColumnNames = array_column($this->pdo->query('PRAGMA table_info(sync_jobs)')->fetchAll(), 'name');
         foreach ([
