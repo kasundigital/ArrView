@@ -145,33 +145,47 @@ final class MetadataService
 
     public function enrichAll(?callable $progress = null): array
     {
-        $targets = [];
+        $total =
+            (int)$this->pdo->query("SELECT COUNT(*) FROM movies WHERE tmdb_id IS NOT NULL AND tmdb_id>0")->fetchColumn()
+            + (int)$this->pdo->query("SELECT COUNT(*) FROM series WHERE tmdb_id IS NOT NULL AND tmdb_id>0")->fetchColumn();
+
+        $done = 0;
+        $failed = 0;
+
         foreach (['movie'=>'movies','series'=>'series'] as $type=>$table) {
-            $rows = $this->pdo->query("SELECT title,tmdb_id FROM {$table} WHERE tmdb_id IS NOT NULL AND tmdb_id>0")->fetchAll();
-            foreach ($rows as $row) {
+            $stmt = $this->pdo->query("SELECT title,tmdb_id FROM {$table} WHERE tmdb_id IS NOT NULL AND tmdb_id>0 ORDER BY id");
+            while ($row = $stmt->fetch(PDO::FETCH_ASSOC)) {
                 $tmdbId = (int)$row['tmdb_id'];
-                if ($tmdbId > 0) $targets[] = [$type,$tmdbId,(string)$row['title']];
+                if ($tmdbId < 1) continue;
+
+                $title = (string)($row['title'] ?? ucfirst($type));
+                $progress?->__invoke($done, $total, $title);
+
+                try {
+                    $this->enrich($type, $tmdbId, false);
+                } catch (Throwable $e) {
+                    $failed++;
+                    $message = strtolower($e->getMessage());
+                    if (str_contains($message, 'quota') || str_contains($message, 'rate limit')) {
+                        throw $e;
+                    }
+                }
+
+                $done++;
+
+                // Gentle pacing protects TMDB and the shared ArrView metadata service.
+                // Cached records return immediately, so this mainly affects actual remote requests.
+                if (($done % 5) === 0) usleep(250000);
             }
         }
 
-        $total = count($targets);
-        $done = 0;
-        $failed = 0;
-        foreach ($targets as [$type,$tmdbId,$title]) {
-            $progress?->__invoke($done, $total, $title);
-            try {
-                $this->enrich($type, $tmdbId, false);
-            } catch (Throwable $e) {
-                $failed++;
-                if (str_contains(strtolower($e->getMessage()), 'quota')) {
-                    throw $e;
-                }
-            }
-            $done++;
-            if (($done % 20) === 0) usleep(150000);
-        }
         $progress?->__invoke($done, $total, 'Completed');
-        return ['ok'=>true,'count'=>$done,'failed'=>$failed,'message'=>"Metadata enrichment completed: {$done} processed, {$failed} failed."];
+        return [
+            'ok'=>true,
+            'count'=>$done,
+            'failed'=>$failed,
+            'message'=>"Metadata enrichment completed: {$done} processed, {$failed} failed."
+        ];
     }
 
     private function fetchDirect(string $mediaType, int $tmdbId, string $credential): array
