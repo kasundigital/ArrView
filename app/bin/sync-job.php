@@ -48,6 +48,8 @@ try {
         }
 
         $percent = $total > 0 ? min(100, round(($current / $total) * 100, 1)) : 0;
+        $pdo->prepare('UPDATE sync_jobs SET current_item=?,total_items=?,current_title=?,message=? WHERE id=?')
+            ->execute([$current,$total,$title,$total > 0 ? "{$current} / {$total}" : "{$current} items",$jobId]);
         $writeProgress([
             'status'=>'running',
             'current'=>$current,
