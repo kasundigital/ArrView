@@ -4,6 +4,9 @@ $currentUser=$auth->requireLogin();
 
 $id=(int)($_GET['id']??0);
 $deep=($_GET['deep']??'')==='1';
+$refresh=($_GET['refresh']??'')==='1';
+$cacheTtl=max(1,(int)app_setting('diagnostic_cache_ttl_minutes','15'));
+$cacheInfo=null;
 
 $stmt=$pdo->prepare('SELECT e.*,s.title series_title,s.id series_local_id,i.id instance_id,i.name instance_name,i.type,i.url,i.api_key
  FROM episodes e JOIN series s ON s.id=e.series_id JOIN instances i ON i.id=e.instance_id WHERE e.id=? LIMIT 1');
@@ -12,12 +15,22 @@ $episode=$stmt->fetch();
 if(!$episode){http_response_code(404);exit('Episode not found.');}
 
 $result=null;$error=null;
-try{
-    $result=$arr->diagnoseMissingEpisode([
-        'id'=>(int)$episode['instance_id'],'name'=>$episode['instance_name'],'type'=>$episode['type'],
-        'url'=>$episode['url'],'api_key'=>$episode['api_key']
-    ],(int)$episode['remote_id'],$deep);
-}catch(Throwable $e){$error=$e->getMessage();}
+$cacheKey='episode:'.(int)$episode['instance_id'].':'.(int)$episode['remote_id'].':'.($deep?'deep':'light');
+if(!$refresh){
+    $cacheInfo=diagnostic_cache_read($cacheKey,$cacheTtl);
+    if($cacheInfo)$result=$cacheInfo['payload'];
+}
+if(!$result){
+    try{
+        $instance=reveal_instance([
+            'id'=>(int)$episode['instance_id'],'name'=>$episode['instance_name'],'type'=>$episode['type'],
+            'url'=>$episode['url'],'api_key'=>$episode['api_key']
+        ]);
+        $result=$arr->diagnoseMissingEpisode($instance,(int)$episode['remote_id'],$deep);
+        diagnostic_cache_write($cacheKey,$result);
+        $cacheInfo=['checked_at'=>gmdate('Y-m-d H:i:s'),'age_seconds'=>0,'payload'=>$result];
+    }catch(Throwable $e){$error=$e->getMessage();}
+}
 
 function epDate(?string $date):string{if(!$date)return '—';try{return(new DateTime($date))->format('Y-m-d H:i:s');}catch(Throwable){return$date;}}
 
@@ -115,11 +128,12 @@ function sonarrIssueSummary(array $result, array $episode): array {
 }
 ?>
 <!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Episode Diagnostics · ArrView</title><link rel="stylesheet" href="/assets/style.css"></head><body>
-<header class="topbar"><a class="brand" href="/">ArrView <small class="version-chip">v<?=e(ARRVIEW_VERSION)?></small></a><nav><a href="/?type=movies">Movies</a><a class="active" href="/?type=series">Series</a><a href="/support.php">Support</a><?php if($currentUser['role']==='admin'):?><a href="/admin.php">Admin</a><?php endif;?><span class="user-chip"><?=e($currentUser['username'])?></span><a href="/logout.php">Logout</a></nav></header>
+<header class="topbar"><a class="brand" href="/">ArrView <small class="version-chip">v<?=e(ARRVIEW_VERSION)?></small></a><nav><a href="/?type=movies">Movies</a><a class="active" href="/?type=series">Series</a><a href="/support.php">Support</a><?php if($currentUser['role']==='admin'):?><a href="/admin.php">Admin</a><a href="/system.php">System</a><?php endif;?><span class="user-chip"><?=e($currentUser['username'])?></span><a href="/logout.php">Logout</a></nav></header>
 <main class="wrap admin-wrap">
 <section class="catalog-head"><div><p class="eyebrow">SONARR EPISODE DIAGNOSTICS</p><h1><?=e($episode['series_title'])?></h1><p class="meta">S<?=str_pad((string)$episode['season_number'],2,'0',STR_PAD_LEFT)?>E<?=str_pad((string)$episode['episode_number'],2,'0',STR_PAD_LEFT)?> · <?=e($episode['title'])?> · <?=e($episode['instance_name'])?></p></div><a class="button-link" href="/series.php?id=<?=(int)$episode['series_local_id']?>">← Back to Series</a></section>
 
 <div class="notice info"><?=$deep?'Deep Search is querying enabled Sonarr indexers.':'Light check reads episode state, queue and recent history only. It does not search indexers.'?></div>
+<?php if($cacheInfo):?><div class="diagnostic-cache-bar"><div><strong><?=$cacheInfo['age_seconds']>0?'Cached diagnostic':'Fresh diagnostic'?></strong><span>Checked <?=e((string)$cacheInfo['checked_at'])?> · <?=number_format((int)$cacheInfo['age_seconds'])?>s old · TTL <?=$cacheTtl?> min</span></div><a class="table-action" href="/episode-diagnose.php?id=<?=$id?><?=$deep?'&deep=1':''?>&refresh=1">Refresh now</a></div><?php endif;?>
 <?php if($error):?><div class="notice error"><strong>Diagnostic failed:</strong> <?=e($error)?></div>
 <?php elseif($result):
 $diag=$result['diagnosis']??['label'=>'Unknown','severity'=>'warning','detail'=>''];
