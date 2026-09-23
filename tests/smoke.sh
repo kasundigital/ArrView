@@ -65,6 +65,12 @@ MOVIES="$(docker exec "$APP" php /tests/smoke-db.php movie-count)"
 [ "$MOVIES" = "2" ]
 echo "PASS: mock Radarr full sync imported 2 movies"
 
+MOVIE_FILE_PATH="$(docker exec "$APP" php /tests/smoke-db.php movie-file-path)"
+[ "$MOVIE_FILE_PATH" = "/mnt/Movies/The Matrix (1999)/The.Matrix.1999.mkv" ]
+MOVIE_FILE_CODEC="$(docker exec "$APP" php /tests/smoke-db.php movie-file-codec)"
+[ "$MOVIE_FILE_CODEC" = "x264" ]
+echo "PASS: separate Radarr moviefile metadata cached for VOD and file details"
+
 UPCOMING="$(docker exec "$APP" php /tests/smoke-db.php upcoming-count)"
 [ "$UPCOMING" = "1" ]
 echo "PASS: future release availability persisted"
