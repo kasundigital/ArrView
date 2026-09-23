@@ -20,11 +20,21 @@ final class MetadataService
         $mode = (string)($settings['metadata_mode'] ?? 'free');
         if (!in_array($mode, ['free','personal'], true)) $mode = 'free';
 
+        $credentialError = null;
+        $tmdbKey = (string)($settings['tmdb_api_key'] ?? '');
+        if ($this->secret && $tmdbKey !== '') {
+            try {
+                $tmdbKey = $this->secret->reveal($tmdbKey);
+            } catch (Throwable $e) {
+                $credentialError = $e->getMessage();
+                $tmdbKey = '';
+            }
+        }
+
         return [
             'mode' => $mode,
-            'tmdb_api_key' => $this->secret
-                ? $this->secret->reveal((string)($settings['tmdb_api_key'] ?? ''))
-                : (string)($settings['tmdb_api_key'] ?? ''),
+            'tmdb_api_key' => $tmdbKey,
+            'credential_error' => $credentialError,
             'installation_id' => (string)($settings['installation_id'] ?? ''),
             'free_endpoint' => rtrim((string)(getenv('ARRVIEW_METADATA_API_URL') ?: self::DEFAULT_FREE_ENDPOINT), '?&'),
         ];
