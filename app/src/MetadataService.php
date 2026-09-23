@@ -96,10 +96,20 @@ final class MetadataService
             $source = 'personal_tmdb';
             $quota = null;
         } else {
-            $response = $this->fetchFreeService($mediaType, $tmdbId, $settings);
-            $payload = $response['data'];
-            $source = 'arrview_free';
-            $quota = $response['quota'] ?? null;
+            $sharedToken = trim((string)getenv('ARRVIEW_SHARED_TMDB_BEARER_TOKEN'));
+            if ($sharedToken !== '') {
+                // Official ArrView metadata host: call TMDB directly using the server-side
+                // shared token. This avoids a deadlock when PHP's built-in server would
+                // otherwise make an HTTP request back into itself.
+                $payload = $this->fetchDirect($mediaType, $tmdbId, $sharedToken);
+                $source = 'arrview_free_local';
+                $quota = null;
+            } else {
+                $response = $this->fetchFreeService($mediaType, $tmdbId, $settings);
+                $payload = $response['data'];
+                $source = 'arrview_free';
+                $quota = $response['quota'] ?? null;
+            }
         }
 
         $this->store($mediaType, $tmdbId, $payload, $source);
@@ -168,7 +178,16 @@ final class MetadataService
 
     private function fetchFreeService(string $mediaType, int $tmdbId, array $settings): array
     {
-        $url = $settings['free_endpoint'] . '?type=' . rawurlencode($mediaType) . '&id=' . $tmdbId;
+        $endpoint = (string)$settings['free_endpoint'];
+        $endpointHost = strtolower((string)(parse_url($endpoint, PHP_URL_HOST) ?: ''));
+        $currentHost = strtolower(preg_replace('/:\\d+$/', '', (string)($_SERVER['HTTP_HOST'] ?? '')));
+        if ($endpointHost !== '' && $currentHost !== '' && $endpointHost === $currentHost) {
+            throw new RuntimeException(
+                'ArrView Free Metadata is not configured on this server. Add ARRVIEW_SHARED_TMDB_BEARER_TOKEN to the official metadata host, or switch to Personal TMDB mode.'
+            );
+        }
+
+        $url = $endpoint . '?type=' . rawurlencode($mediaType) . '&id=' . $tmdbId;
         $headers = [
             'Accept: application/json',
             'X-ArrView-Install: ' . $settings['installation_id'],
@@ -187,8 +206,8 @@ final class MetadataService
         curl_setopt_array($ch, [
             CURLOPT_RETURNTRANSFER => true,
             CURLOPT_FOLLOWLOCATION => true,
-            CURLOPT_CONNECTTIMEOUT => 8,
-            CURLOPT_TIMEOUT => 20,
+            CURLOPT_CONNECTTIMEOUT => 4,
+            CURLOPT_TIMEOUT => 10,
             CURLOPT_HTTPHEADER => $headers,
             CURLOPT_USERAGENT => 'ArrView/' . ARRVIEW_VERSION,
         ]);
