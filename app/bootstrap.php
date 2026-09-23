@@ -7,11 +7,16 @@ require_once __DIR__ . '/src/Database.php';
 require_once __DIR__ . '/src/ArrService.php';
 require_once __DIR__ . '/src/BatchSyncService.php';
 require_once __DIR__ . '/src/MetadataService.php';
+require_once __DIR__ . '/src/SecretService.php';
+require_once __DIR__ . '/src/BackupService.php';
 require_once __DIR__ . '/src/Auth.php';
 
 $dataDir = getenv('ARRVIEW_DATA') ?: (__DIR__ . '/data');
-$db = new Database(rtrim($dataDir, '/') . '/arrview.sqlite');
+$databasePath = rtrim($dataDir, '/') . '/arrview.sqlite';
+$db = new Database($databasePath);
 $pdo = $db->pdo;
+$secret = new SecretService($pdo);
+$backup = new BackupService($pdo, $databasePath);
 $arr = new ArrService($pdo);
 $batchSync = new BatchSyncService($pdo);
 $metadata = new MetadataService($pdo);
@@ -22,9 +27,14 @@ $auth = new Auth($pdo);
 // to catch any changes that may have been missed by webhooks.
 if (PHP_SAPI !== 'cli') {
     try {
-        $stale = $pdo->query("SELECT id FROM instances
-            WHERE enabled=1
-              AND (last_full_sync_at IS NULL OR datetime(last_full_sync_at) < datetime('now','-12 hours'))")->fetchAll();
+        $syncIntervalStmt = $pdo->prepare("SELECT setting_value FROM app_settings WHERE setting_key='sync_interval_hours' LIMIT 1");
+        $syncIntervalStmt->execute();
+        $syncIntervalHours = max(0, min(168, (int)($syncIntervalStmt->fetchColumn() ?: 12)));
+        $stale = $syncIntervalHours > 0
+            ? $pdo->query("SELECT id FROM instances
+                WHERE enabled=1
+                  AND (last_full_sync_at IS NULL OR datetime(last_full_sync_at) < datetime('now','-" . $syncIntervalHours . " hours'))")->fetchAll()
+            : [];
 
         foreach ($stale as $row) {
             $instanceId = (int)$row['id'];
@@ -34,8 +44,8 @@ if (PHP_SAPI !== 'cli') {
             $active->execute([$instanceId]);
             if ($active->fetchColumn()) continue;
 
-            $pdo->prepare("INSERT INTO sync_jobs(instance_id,status,message)
-                VALUES(?, 'queued', 'Automatic reconciliation queued')")->execute([$instanceId]);
+            $pdo->prepare("INSERT INTO sync_jobs(instance_id,status,message,source)
+                VALUES(?, 'queued', 'Automatic reconciliation queued', 'scheduled')")->execute([$instanceId]);
             $jobId = (int)$pdo->lastInsertId();
 
             $cmd = escapeshellarg(PHP_BINARY) . ' ' .
@@ -49,6 +59,71 @@ if (PHP_SAPI !== 'cli') {
 }
 
 
+
+
+function app_setting(string $key, ?string $default = null): ?string
+{
+    global $pdo;
+    $stmt = $pdo->prepare('SELECT setting_value FROM app_settings WHERE setting_key=? LIMIT 1');
+    $stmt->execute([$key]);
+    $value = $stmt->fetchColumn();
+    return $value === false ? $default : (string)$value;
+}
+
+function set_app_setting(string $key, ?string $value): void
+{
+    global $pdo;
+    $pdo->prepare(
+        'INSERT INTO app_settings(setting_key,setting_value) VALUES(?,?) ON CONFLICT(setting_key) DO UPDATE SET setting_value=excluded.setting_value'
+    )->execute([$key, $value]);
+}
+
+function reveal_instance(array $instance): array
+{
+    global $secret;
+    if (array_key_exists('api_key', $instance)) {
+        $instance['api_key'] = $secret->reveal((string)$instance['api_key']);
+    }
+    return $instance;
+}
+
+function viewer_can_see_vod(array $user): bool
+{
+    if (($user['role'] ?? '') === 'admin') return true;
+    return app_setting('viewer_vod_enabled', '0') === '1';
+}
+
+function vod_url_for(int $instanceId, ?string $filePath): ?string
+{
+    global $pdo;
+    if (!$filePath) return null;
+
+    $stmt = $pdo->prepare(
+        'SELECT local_root,public_base_url FROM vod_mappings
+         WHERE enabled=1 AND (instance_id=? OR instance_id IS NULL)
+         ORDER BY CASE WHEN instance_id=? THEN 0 ELSE 1 END, priority ASC, id ASC'
+    );
+    $stmt->execute([$instanceId, $instanceId]);
+
+    $normalizedPath = str_replace('\\', '/', $filePath);
+    foreach ($stmt->fetchAll() as $mapping) {
+        $root = rtrim(str_replace('\\', '/', (string)$mapping['local_root']), '/');
+        $base = rtrim((string)$mapping['public_base_url'], '/');
+        if ($root === '' || $base === '' || !str_starts_with($normalizedPath, $root)) continue;
+        $relative = ltrim(substr($normalizedPath, strlen($root)), '/');
+        if ($relative === '') continue;
+        return $base . '/' . implode('/', array_map('rawurlencode', explode('/', $relative)));
+    }
+
+    // Backward compatibility with the original single global mapping.
+    $root = rtrim(str_replace('\\', '/', (string)app_setting('public_local_root', '')), '/');
+    $base = rtrim((string)app_setting('public_base_url', ''), '/');
+    if ($root !== '' && $base !== '' && str_starts_with($normalizedPath, $root)) {
+        $relative = ltrim(substr($normalizedPath, strlen($root)), '/');
+        if ($relative !== '') return $base . '/' . implode('/', array_map('rawurlencode', explode('/', $relative)));
+    }
+    return null;
+}
 
 function movie_availability_state(array $movie): array
 {
