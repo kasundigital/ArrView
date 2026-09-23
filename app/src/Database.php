@@ -70,6 +70,7 @@ CREATE TABLE IF NOT EXISTS movies (
     aired_missing_count INTEGER NOT NULL DEFAULT 0,
     future_missing_count INTEGER NOT NULL DEFAULT 0,
     missing_audio_count INTEGER NOT NULL DEFAULT 0,
+    language_inconsistent INTEGER NOT NULL DEFAULT 0,
     path TEXT NULL,
     file_size INTEGER NULL,
     details_json TEXT NULL,
@@ -104,6 +105,25 @@ CREATE TABLE IF NOT EXISTS series (
 CREATE TABLE IF NOT EXISTS app_settings (
     setting_key TEXT PRIMARY KEY,
     setting_value TEXT NULL
+);
+
+CREATE TABLE IF NOT EXISTS login_attempts (
+    attempt_key TEXT PRIMARY KEY,
+    failures INTEGER NOT NULL DEFAULT 0,
+    first_failed_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    last_failed_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    locked_until TEXT NULL
+);
+
+CREATE TABLE IF NOT EXISTS vod_mappings (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    instance_id INTEGER NULL,
+    local_root TEXT NOT NULL,
+    public_base_url TEXT NOT NULL,
+    priority INTEGER NOT NULL DEFAULT 100,
+    enabled INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY(instance_id) REFERENCES instances(id) ON DELETE CASCADE
 );
 
 CREATE TABLE IF NOT EXISTS episodes (
@@ -178,6 +198,8 @@ CREATE TABLE IF NOT EXISTS metadata_jobs (
     total_items INTEGER NOT NULL DEFAULT 0,
     current_title TEXT NULL,
     message TEXT NULL,
+    source TEXT NOT NULL DEFAULT 'manual',
+    cancel_requested INTEGER NOT NULL DEFAULT 0,
     started_at TEXT NULL,
     finished_at TEXT NULL,
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
@@ -223,6 +245,8 @@ CREATE INDEX IF NOT EXISTS idx_episodes_airdate ON episodes(air_date_utc);
 CREATE INDEX IF NOT EXISTS idx_episodes_missing ON episodes(has_file, monitored);
 CREATE INDEX IF NOT EXISTS idx_media_metadata_tmdb ON media_metadata(media_type, tmdb_id);
 CREATE INDEX IF NOT EXISTS idx_metadata_jobs_created ON metadata_jobs(id DESC);
+CREATE INDEX IF NOT EXISTS idx_login_attempts_locked ON login_attempts(locked_until);
+CREATE INDEX IF NOT EXISTS idx_vod_mappings_instance ON vod_mappings(instance_id, enabled, priority);
 SQL);
 
         // Lightweight migration for installations created before series audio tracking.
@@ -296,6 +320,7 @@ SQL);
             'aired_missing_count' => 'INTEGER NOT NULL DEFAULT 0',
             'future_missing_count' => 'INTEGER NOT NULL DEFAULT 0',
             'missing_audio_count' => 'INTEGER NOT NULL DEFAULT 0',
+            'language_inconsistent' => 'INTEGER NOT NULL DEFAULT 0',
             'details_json' => 'TEXT NULL',
             'tmdb_id' => 'INTEGER NULL',
             'imdb_id' => 'TEXT NULL',
@@ -338,6 +363,34 @@ SQL);
         } catch (Throwable) {
             // Older SQLite builds without JSON functions can wait for the next Radarr sync.
         }
+
+
+        $syncColumnNames = array_column($this->pdo->query('PRAGMA table_info(sync_jobs)')->fetchAll(), 'name');
+        foreach ([
+            'source' => "TEXT NOT NULL DEFAULT 'manual'",
+            'cancel_requested' => 'INTEGER NOT NULL DEFAULT 0',
+        ] as $name => $definition) {
+            if (!in_array($name, $syncColumnNames, true)) {
+                $this->pdo->exec("ALTER TABLE sync_jobs ADD COLUMN {$name} {$definition}");
+            }
+        }
+
+        $defaults = [
+            'sync_interval_hours' => '12',
+            'viewer_vod_enabled' => '0',
+            'preferred_audio_languages' => '',
+            'preferred_language_warning' => '1',
+            'diagnostic_cache_ttl_minutes' => '15',
+            'encrypt_api_keys' => '0',
+            'library_page_size' => '100',
+        ];
+        $settingInsert = $this->pdo->prepare('INSERT OR IGNORE INTO app_settings(setting_key,setting_value) VALUES(?,?)');
+        foreach ($defaults as $key => $value) {
+            $settingInsert->execute([$key, $value]);
+        }
+
+        // Keep the server-side rate-limit table compact.
+        $this->pdo->exec("DELETE FROM login_attempts WHERE datetime(last_failed_at) < datetime('now','-30 days')");
 
         $this->pdo->exec('CREATE INDEX IF NOT EXISTS idx_movies_tmdb ON movies(tmdb_id)');
         $this->pdo->exec('CREATE INDEX IF NOT EXISTS idx_movies_availability ON movies(has_file, availability_date, monitored)');
