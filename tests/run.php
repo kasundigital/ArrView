@@ -4,6 +4,7 @@ declare(strict_types=1);
 require_once '/app/src/Database.php';
 require_once '/app/src/SecretService.php';
 require_once '/app/src/BackupService.php';
+require_once '/app/src/Auth.php';
 
 function ok(bool $condition, string $message): void {
     if (!$condition) {
@@ -26,6 +27,14 @@ mkdir($root,0775,true);
 $freshPath=$root.'/fresh.sqlite';
 $fresh=new Database($freshPath);
 $pdo=$fresh->pdo;
+
+$_SERVER['REMOTE_ADDR']='127.0.0.1';
+$pdo->prepare("INSERT INTO users(username,password_hash,role) VALUES(?,?,?)")
+    ->execute(['rate-test',password_hash('CorrectPass123!',PASSWORD_DEFAULT),'admin']);
+$auth=new Auth($pdo);
+for($i=0;$i<5;$i++)$auth->login('rate-test','wrong-password');
+ok($auth->loginLockSeconds('rate-test')>0,'server-side login rate limit locks repeated failures');
+
 ok(is_file($freshPath),'fresh SQLite database created');
 foreach(['users','instances','movies','series','episodes','app_settings','vod_mappings','login_attempts','sync_jobs','media_metadata'] as $table){
     $count=(int)$pdo->query("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name=".$pdo->quote($table))->fetchColumn();
