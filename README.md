@@ -11,7 +11,7 @@
 <p align="center">
   <a href="https://github.com/kasundigital/ArrView/stargazers"><img alt="GitHub Stars" src="https://img.shields.io/github/stars/kasundigital/ArrView?style=for-the-badge"></a>
   <a href="https://github.com/kasundigital/ArrView/pkgs/container/arrview"><img alt="GHCR" src="https://img.shields.io/badge/GHCR-arrview-blue?style=for-the-badge&logo=docker"></a>
-  <a href="https://github.com/kasundigital/ArrView"><img alt="Version" src="https://img.shields.io/badge/version-v0.11.2-7c9cff?style=for-the-badge"></a>
+  <a href="https://github.com/kasundigital/ArrView"><img alt="Version" src="https://img.shields.io/badge/version-v0.12.0-7c9cff?style=for-the-badge"></a>
   <a href="https://buymeacoffee.com/kasundigital"><img alt="Buy Me a Coffee" src="https://img.shields.io/badge/Buy%20Me%20a%20Coffee-Support%20ArrView-FFDD00?style=for-the-badge&logo=buymeacoffee&logoColor=000000"></a>
 </p>
 
@@ -52,7 +52,7 @@ Typical columns include:
 
 - Compact movie list instead of large poster cards
 - Movie title and release year
-- Available / Missing file status
+- Availability-aware status: Available / Upcoming / Missing / Unknown Availability / Unmonitored
 - Audio language
 - Quality
 - Radarr instance name
@@ -75,8 +75,11 @@ Typical columns include:
 Movies:
 
 - **All**
-- **Missing**
+- **Missing** — expected to be available already, but no file exists
+- **Upcoming** — release/availability date is still in the future
 - **Available**
+- **Unknown Availability**
+- **Unmonitored**
 - **Missing Audio Info**
 - **Monitored**
 
@@ -92,7 +95,7 @@ Every filter includes a count so you can immediately see where attention is need
 
 ### 🧠 Why Missing? diagnostics
 
-For missing Radarr movies, ArrView can inspect live Radarr information and help explain why a movie has not been grabbed or imported.
+For genuinely missing Radarr movies, ArrView can inspect live Radarr information and help explain why a movie has not been grabbed or imported. Future/unreleased titles are classified as **Upcoming** and are not counted as missing or sent to Deep Search.
 
 Examples include:
 
