@@ -1,15 +1,9 @@
-# ArrView v1.0.2 — Sync Liveness Hotfix
+# ArrView v1.0.3 — Radarr File Details Fix
 
-This release fixes Recent Jobs showing **Queued** or **Running** when no sync worker is actually active.
+This release fixes available movies showing quality and size while filename, file path, media information, and VOD URL remained blank.
 
-## Fixes
+ArrView now stores the complete Radarr movie-file record in SQLite. If the normal Radarr movie list does not include all file details, ArrView retrieves missing records in efficient batches from Radarr's movie-file API.
 
-- Sync workers now update a database heartbeat while processing.
-- Queued jobs that never start are recovered after 3 minutes.
-- Running jobs with no heartbeat are recovered after 5 minutes.
-- Recovery runs every scheduler cycle even when automatic full sync is disabled.
-- Opening **System** also reconciles stale job state before rendering.
-- Terminal database state overrides stale progress JSON.
-- Cancelling a queued job now ends it immediately.
+After upgrading, run a **Radarr full sync** once to populate detailed file information for existing movies.
 
-Existing stale jobs are corrected automatically after upgrade; no database reset is required.
+No database reset is required.
