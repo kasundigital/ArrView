@@ -35,7 +35,7 @@ if ($existing) {
     exit;
 }
 
-$pdo->prepare("INSERT INTO sync_jobs(instance_id,status,message) VALUES(?, 'queued', 'Queued')")->execute([$instanceId]);
+$pdo->prepare("INSERT INTO sync_jobs(instance_id,status,message,source,cancel_requested) VALUES(?, 'queued', 'Queued', 'manual', 0)")->execute([$instanceId]);
 $jobId = (int)$pdo->lastInsertId();
 
 $cmd = escapeshellarg(PHP_BINARY) . ' ' . escapeshellarg(dirname(__DIR__) . '/bin/sync-job.php') . ' ' . $jobId . ' > /tmp/arrview-sync-' . $jobId . '.log 2>&1 &';
