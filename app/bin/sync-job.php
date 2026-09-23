@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 require_once dirname(__DIR__) . '/src/Database.php';
 require_once dirname(__DIR__) . '/src/BatchSyncService.php';
+require_once dirname(__DIR__) . '/src/SecretService.php';
 
 $jobId = (int)($argv[1] ?? 0);
 if ($jobId <= 0) exit(1);
@@ -11,6 +12,7 @@ if ($jobId <= 0) exit(1);
 $dataDir = getenv('ARRVIEW_DATA') ?: (dirname(__DIR__) . '/data');
 $db = new Database(rtrim($dataDir, '/') . '/arrview.sqlite');
 $pdo = $db->pdo;
+$secret = new SecretService($pdo);
 $batchSync = new BatchSyncService($pdo);
 
 $jobStmt = $pdo->prepare('SELECT * FROM sync_jobs WHERE id=?');
@@ -22,6 +24,7 @@ $instanceStmt = $pdo->prepare('SELECT * FROM instances WHERE id=?');
 $instanceStmt->execute([(int)$job['instance_id']]);
 $instance = $instanceStmt->fetch();
 if (!$instance) exit(3);
+$instance['api_key'] = $secret->reveal((string)$instance['api_key']);
 
 $progressDir = rtrim($dataDir, '/') . '/progress';
 if (!is_dir($progressDir)) mkdir($progressDir, 0775, true);
@@ -38,6 +41,12 @@ $writeProgress(['status'=>'running','current'=>0,'total'=>0,'percent'=>0,'title'
 
 try {
     $result = $batchSync->syncInstance($instance, function(int $current, int $total, string $title) use ($writeProgress, $jobId, $pdo): void {
+        $cancel = $pdo->prepare('SELECT cancel_requested FROM sync_jobs WHERE id=?');
+        $cancel->execute([$jobId]);
+        if ((int)$cancel->fetchColumn() === 1) {
+            throw new RuntimeException('__ARRVIEW_SYNC_CANCELLED__');
+        }
+
         $percent = $total > 0 ? min(100, round(($current / $total) * 100, 1)) : 0;
         $writeProgress([
             'status'=>'running',
@@ -54,6 +63,12 @@ try {
         ->execute([$count,$count,(string)($result['message'] ?? 'Sync completed'),$jobId]);
     $writeProgress(['status'=>'completed','current'=>$count,'total'=>$count,'percent'=>100,'title'=>'Completed','message'=>(string)($result['message'] ?? 'Sync completed')]);
 } catch (Throwable $e) {
+    if ($e->getMessage() === '__ARRVIEW_SYNC_CANCELLED__') {
+        $pdo->prepare("UPDATE sync_jobs SET status='cancelled',message='Cancelled by administrator',finished_at=CURRENT_TIMESTAMP WHERE id=?")->execute([$jobId]);
+        $writeProgress(['status'=>'cancelled','current'=>0,'total'=>0,'percent'=>0,'title'=>'Sync cancelled','message'=>'Cancelled by administrator']);
+        exit(0);
+    }
+
     $pdo->prepare("UPDATE sync_jobs SET status='failed',message=?,finished_at=CURRENT_TIMESTAMP WHERE id=?")->execute([$e->getMessage(),$jobId]);
     $writeProgress(['status'=>'failed','current'=>0,'total'=>0,'percent'=>0,'title'=>'Sync failed','message'=>$e->getMessage()]);
     exit(4);
