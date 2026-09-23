@@ -13,13 +13,14 @@ if (!in_array($sortDir, ['asc','desc'], true)) $sortDir = 'asc';
 
 $validFilters = $type === 'series'
     ? ['all','airedmissing','missing','complete','future','noaudio','unmonitored','monitored']
-    : ['all','missing','available','noaudio','monitored'];
+    : ['all','missing','upcoming','available','unknown','unmonitored','noaudio','monitored'];
 if (!in_array($filter, $validFilters, true)) $filter = 'all';
 
 $movieCount = (int)$pdo->query('SELECT COUNT(*) FROM movies')->fetchColumn();
 $seriesCount = (int)$pdo->query('SELECT COUNT(*) FROM series')->fetchColumn();
 $instanceCount = (int)$pdo->query('SELECT COUNT(*) FROM instances WHERE enabled=1')->fetchColumn();
-$missingMovieCount = (int)$pdo->query('SELECT COUNT(*) FROM movies WHERE has_file=0')->fetchColumn();
+$missingMovieCount = (int)$pdo->query("SELECT COUNT(*) FROM movies WHERE has_file=0 AND monitored=1 AND availability_date IS NOT NULL AND datetime(availability_date) <= datetime('now')")->fetchColumn();
+$upcomingMovieCount = (int)$pdo->query("SELECT COUNT(*) FROM movies WHERE has_file=0 AND monitored=1 AND availability_date IS NOT NULL AND datetime(availability_date) > datetime('now')")->fetchColumn();
 $availableMovieCount = (int)$pdo->query('SELECT COUNT(*) FROM movies WHERE has_file=1')->fetchColumn();
 $incompleteSeriesCount = (int)$pdo->query('SELECT COUNT(*) FROM series WHERE episode_file_count < episode_count')->fetchColumn();
 $airedMissingSeriesCount = (int)$pdo->query('SELECT COUNT(*) FROM series WHERE aired_missing_count>0')->fetchColumn();
@@ -55,8 +56,11 @@ $filterCounts = [];
 if ($type === 'movies') {
     $countSql = "SELECT
         COUNT(*) total,
-        SUM(CASE WHEN m.has_file=0 THEN 1 ELSE 0 END) missing,
+        SUM(CASE WHEN m.has_file=0 AND m.monitored=1 AND m.availability_date IS NOT NULL AND datetime(m.availability_date) <= datetime('now') THEN 1 ELSE 0 END) missing,
+        SUM(CASE WHEN m.has_file=0 AND m.monitored=1 AND m.availability_date IS NOT NULL AND datetime(m.availability_date) > datetime('now') THEN 1 ELSE 0 END) upcoming,
         SUM(CASE WHEN m.has_file=1 THEN 1 ELSE 0 END) available,
+        SUM(CASE WHEN m.has_file=0 AND m.monitored=1 AND m.availability_date IS NULL THEN 1 ELSE 0 END) unknown,
+        SUM(CASE WHEN m.has_file=0 AND m.monitored=0 THEN 1 ELSE 0 END) unmonitored,
         SUM(CASE WHEN m.has_file=1 AND (m.audio_languages IS NULL OR TRIM(m.audio_languages)='') THEN 1 ELSE 0 END) noaudio,
         SUM(CASE WHEN m.monitored=1 THEN 1 ELSE 0 END) monitored
         FROM movies m JOIN instances i ON i.id=m.instance_id WHERE i.enabled=1";
@@ -72,8 +76,11 @@ if ($type === 'movies') {
     if ($year > 0) { $sql .= ' AND m.year=?'; $params[] = $year; }
     if ($q !== '') { $sql .= ' AND m.title LIKE ?'; $params[] = '%' . $q . '%'; }
 
-    if ($filter === 'missing') $sql .= ' AND m.has_file=0';
+    if ($filter === 'missing') $sql .= " AND m.has_file=0 AND m.monitored=1 AND m.availability_date IS NOT NULL AND datetime(m.availability_date) <= datetime('now')";
+    elseif ($filter === 'upcoming') $sql .= " AND m.has_file=0 AND m.monitored=1 AND m.availability_date IS NOT NULL AND datetime(m.availability_date) > datetime('now')";
     elseif ($filter === 'available') $sql .= ' AND m.has_file=1';
+    elseif ($filter === 'unknown') $sql .= ' AND m.has_file=0 AND m.monitored=1 AND m.availability_date IS NULL';
+    elseif ($filter === 'unmonitored') $sql .= ' AND m.has_file=0 AND m.monitored=0';
     elseif ($filter === 'noaudio') $sql .= " AND m.has_file=1 AND (m.audio_languages IS NULL OR TRIM(m.audio_languages)='')";
     elseif ($filter === 'monitored') $sql .= ' AND m.monitored=1';
 
@@ -198,7 +205,7 @@ function sortIndicator(string $sortBy, string $sortDir, string $column): string
     <section class="dashboard-stats" aria-label="Library summary">
         <a class="dashboard-stat" href="/?type=movies">
             <span class="dashboard-stat-icon">🎬</span>
-            <div><small>Movies</small><strong><?=number_format($movieCount)?></strong><span><?=number_format($availableMovieCount)?> available</span></div>
+            <div><small>Movies</small><strong><?=number_format($movieCount)?></strong><span><?=number_format($availableMovieCount)?> available · <?=number_format($upcomingMovieCount)?> upcoming</span></div>
         </a>
         <a class="dashboard-stat alert" href="/?type=movies&filter=missing">
             <span class="dashboard-stat-icon">!</span>
@@ -274,7 +281,10 @@ function sortIndicator(string $sortBy, string $sortDir, string $column): string
         <a class="<?=$filter==='all'?'active':''?>" href="<?=e(filterUrl($type,'all',$instanceId,$q,$year,$sortBy,$sortDir))?>">All <span><?=number_format((int)($filterCounts['total']??0))?></span></a>
         <a class="<?=$filter==='missing'?'active danger-filter':''?>" href="<?=e(filterUrl($type,'missing',$instanceId,$q,$year,$sortBy,$sortDir))?>">Missing <span><?=number_format((int)($filterCounts['missing']??0))?></span></a>
         <?php if($type==='movies'):?>
+            <a class="<?=$filter==='upcoming'?'active':''?>" href="<?=e(filterUrl($type,'upcoming',$instanceId,$q,$year,$sortBy,$sortDir))?>">Upcoming <span><?=number_format((int)($filterCounts['upcoming']??0))?></span></a>
             <a class="<?=$filter==='available'?'active':''?>" href="<?=e(filterUrl($type,'available',$instanceId,$q,$year,$sortBy,$sortDir))?>">Available <span><?=number_format((int)($filterCounts['available']??0))?></span></a>
+            <a class="<?=$filter==='unknown'?'active warning-filter':''?>" href="<?=e(filterUrl($type,'unknown',$instanceId,$q,$year,$sortBy,$sortDir))?>">Unknown Availability <span><?=number_format((int)($filterCounts['unknown']??0))?></span></a>
+            <a class="<?=$filter==='unmonitored'?'active':''?>" href="<?=e(filterUrl($type,'unmonitored',$instanceId,$q,$year,$sortBy,$sortDir))?>">Unmonitored <span><?=number_format((int)($filterCounts['unmonitored']??0))?></span></a>
         <?php else:?>
             <a class="<?=$filter==='airedmissing'?'active danger-filter':''?>" href="<?=e(filterUrl($type,'airedmissing',$instanceId,$q,$year,$sortBy,$sortDir))?>">Aired Missing <span><?=number_format((int)($filterCounts['airedmissing']??0))?></span></a>
             <a class="<?=$filter==='complete'?'active':''?>" href="<?=e(filterUrl($type,'complete',$instanceId,$q,$year,$sortBy,$sortDir))?>">Complete <span><?=number_format((int)($filterCounts['complete']??0))?></span></a>
@@ -306,11 +316,12 @@ function sortIndicator(string $sortBy, string $sortDir, string $column): string
                 <?php foreach($items as $item):?>
                     <?php
                     if ($type === 'movies') {
-                        $isMissing = !(int)$item['has_file'];
-                        $statusText = $isMissing ? 'Missing' : 'Available';
-                        $statusClass = $isMissing ? 'status-missing' : 'status-ok';
+                        $movieState = movie_availability_state($item);
+                        $isMissing = $movieState['key'] === 'missing';
+                        $statusText = $movieState['label'];
+                        $statusClass = $movieState['class'];
                         $detail = $item['quality'] ?: '—';
-                        $audio = $item['audio_languages'] ?: ($isMissing ? 'No file' : 'Unknown');
+                        $audio = $item['audio_languages'] ?: (!empty($item['has_file']) ? 'Unknown' : 'No file');
                     } else {
                         $episodes = (int)$item['episode_count'];
                         $files = (int)$item['episode_file_count'];
@@ -336,7 +347,7 @@ function sortIndicator(string $sortBy, string $sortDir, string $column): string
                         <td class="action-cell">
                             <?php if($type==='movies'):?>
                                 <a class="table-action" href="/movie.php?id=<?=(int)$item['id']?>">Details</a>
-                                <?php if($isMissing):?><a class="table-action important" href="/diagnose.php?id=<?=(int)$item['id']?>">Why missing?</a><?php endif;?>
+                                <?php if($isMissing):?><a class="table-action important" href="/diagnose.php?id=<?=(int)$item['id']?>">Why missing?</a><?php elseif(($movieState['key']??'')==='upcoming'):?><span class="row-note">Not released yet</span><?php endif;?>
                             <?php elseif($type==='series'):?>
                                 <a class="table-action" href="/series.php?id=<?=(int)$item['id']?>">Seasons & Episodes</a>
                                 <?php if($isMissing):?><span class="muted"> · Missing <?=$episodes-$files?> ep.</span><?php endif;?>
