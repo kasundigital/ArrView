@@ -2,6 +2,19 @@
 
 All notable ArrView changes are documented here.
 
+## [1.0.2] - 2026-09-23
+
+### Hotfix
+
+- Added sync-worker heartbeats so ArrView can distinguish active jobs from dead/stale jobs.
+- Recover queued jobs that never start after 3 minutes.
+- Recover running jobs that stop heartbeating after 5 minutes.
+- Stale-job recovery now runs even when scheduled automatic sync is disabled.
+- The System page recovers stale jobs before showing Recent Jobs.
+- Sync status now treats the database as authoritative for terminal state instead of stale progress JSON.
+- Queued jobs cancel immediately instead of remaining queued with a cancel request.
+
+
 ## [1.0.1] - 2026-09-23
 
 ### Hotfix
