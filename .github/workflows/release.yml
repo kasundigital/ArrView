@@ -1,0 +1,39 @@
+name: Stable release
+
+on:
+  push:
+    branches: ["main"]
+    paths:
+      - "app/version.php"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Read version
+        id: version
+        shell: bash
+        run: |
+          VERSION="$(sed -n "s/const ARRVIEW_VERSION = '\([^']*\)';/\1/p" app/version.php)"
+          test -n "$VERSION"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+      - name: Create tagged GitHub release if missing
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.version.outputs.version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          TAG="v$VERSION"
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "$TAG already exists"
+            exit 0
+          fi
+          gh release create "$TAG" \
+            --target "$GITHUB_SHA" \
+            --title "ArrView $TAG" \
+            --notes-file RELEASE_NOTES.md
