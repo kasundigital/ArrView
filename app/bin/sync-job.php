@@ -19,6 +19,9 @@ $jobStmt = $pdo->prepare('SELECT * FROM sync_jobs WHERE id=?');
 $jobStmt->execute([$jobId]);
 $job = $jobStmt->fetch();
 if (!$job) exit(2);
+if ((int)($job['cancel_requested'] ?? 0) === 1 || !in_array((string)$job['status'], ['queued','running'], true)) {
+    exit(0);
+}
 
 $instanceStmt = $pdo->prepare('SELECT * FROM instances WHERE id=?');
 $instanceStmt->execute([(int)$job['instance_id']]);
@@ -36,7 +39,12 @@ $writeProgress = static function(array $payload) use ($progressFile): void {
     @rename($tmp, $progressFile);
 };
 
-$pdo->prepare("UPDATE sync_jobs SET status='running',started_at=CURRENT_TIMESTAMP,message='Starting sync' WHERE id=?")->execute([$jobId]);
+$pdo->prepare("UPDATE sync_jobs
+    SET status='running',
+        started_at=COALESCE(started_at,CURRENT_TIMESTAMP),
+        heartbeat_at=CURRENT_TIMESTAMP,
+        message='Starting sync'
+    WHERE id=?")->execute([$jobId]);
 $writeProgress(['status'=>'running','current'=>0,'total'=>0,'percent'=>0,'title'=>'Starting sync','message'=>'Connecting to Arr instance...']);
 
 try {
@@ -48,7 +56,7 @@ try {
         }
 
         $percent = $total > 0 ? min(100, round(($current / $total) * 100, 1)) : 0;
-        $pdo->prepare('UPDATE sync_jobs SET current_item=?,total_items=?,current_title=?,message=? WHERE id=?')
+        $pdo->prepare('UPDATE sync_jobs SET current_item=?,total_items=?,current_title=?,message=?,heartbeat_at=CURRENT_TIMESTAMP WHERE id=?')
             ->execute([$current,$total,$title,$total > 0 ? "{$current} / {$total}" : "{$current} items",$jobId]);
         $writeProgress([
             'status'=>'running',
@@ -61,17 +69,17 @@ try {
     });
 
     $count = (int)($result['count'] ?? 0);
-    $pdo->prepare("UPDATE sync_jobs SET status='completed',current_item=?,total_items=?,current_title='Completed',message=?,finished_at=CURRENT_TIMESTAMP WHERE id=?")
+    $pdo->prepare("UPDATE sync_jobs SET status='completed',current_item=?,total_items=?,current_title='Completed',message=?,heartbeat_at=CURRENT_TIMESTAMP,finished_at=CURRENT_TIMESTAMP WHERE id=?")
         ->execute([$count,$count,(string)($result['message'] ?? 'Sync completed'),$jobId]);
     $writeProgress(['status'=>'completed','current'=>$count,'total'=>$count,'percent'=>100,'title'=>'Completed','message'=>(string)($result['message'] ?? 'Sync completed')]);
 } catch (Throwable $e) {
     if ($e->getMessage() === '__ARRVIEW_SYNC_CANCELLED__') {
-        $pdo->prepare("UPDATE sync_jobs SET status='failed',message='Cancelled by administrator',finished_at=CURRENT_TIMESTAMP WHERE id=?")->execute([$jobId]);
+        $pdo->prepare("UPDATE sync_jobs SET status='failed',message='Cancelled by administrator',heartbeat_at=CURRENT_TIMESTAMP,finished_at=CURRENT_TIMESTAMP WHERE id=?")->execute([$jobId]);
         $writeProgress(['status'=>'cancelled','current'=>0,'total'=>0,'percent'=>0,'title'=>'Sync cancelled','message'=>'Cancelled by administrator']);
         exit(0);
     }
 
-    $pdo->prepare("UPDATE sync_jobs SET status='failed',message=?,finished_at=CURRENT_TIMESTAMP WHERE id=?")->execute([$e->getMessage(),$jobId]);
+    $pdo->prepare("UPDATE sync_jobs SET status='failed',message=?,heartbeat_at=CURRENT_TIMESTAMP,finished_at=CURRENT_TIMESTAMP WHERE id=?")->execute([$e->getMessage(),$jobId]);
     $writeProgress(['status'=>'failed','current'=>0,'total'=>0,'percent'=>0,'title'=>'Sync failed','message'=>$e->getMessage()]);
     exit(4);
 }
