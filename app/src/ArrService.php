@@ -408,13 +408,37 @@ final class ArrService
                     if (!empty($statusMessage['title'])) $messages[]=(string)$statusMessage['title'];
                 }
                 if (!empty($item['errorMessage'])) $messages[]=(string)$item['errorMessage'];
+                foreach ($messages as $pathMessage) {
+                    $lowerMessage = strtolower($pathMessage);
+                    if (str_contains($lowerMessage, 'remote path mapping')) {
+                        $categories['Remote path mapping'][] = $pathMessage;
+                    } elseif (
+                        (str_contains($lowerMessage, 'path') || str_contains($lowerMessage, 'directory'))
+                        && (str_contains($lowerMessage, 'does not exist') || str_contains($lowerMessage, 'not found') || str_contains($lowerMessage, 'missing'))
+                    ) {
+                        $categories['Download path missing'][] = $pathMessage;
+                    } elseif (str_contains($lowerMessage, 'permission denied') || str_contains($lowerMessage, 'access denied') || str_contains($lowerMessage, 'not accessible')) {
+                        $categories['Path permissions'][] = $pathMessage;
+                    } elseif (str_contains($lowerMessage, 'download client') && (str_contains($lowerMessage, 'unavailable') || str_contains($lowerMessage, 'cannot') || str_contains($lowerMessage, 'failed'))) {
+                        $categories['Download client'][] = $pathMessage;
+                    }
+                }
+
                 $state=(string)($item['trackedDownloadState'] ?? $item['status'] ?? '');
                 $tracked=(string)($item['trackedDownloadStatus'] ?? '');
                 if ($state==='importBlocked') $categories['Import blocked'][]=$messages[0] ?? 'Sonarr reports import is blocked.';
                 elseif (in_array($state,['failed','failedPending'],true) || $tracked==='error') $categories['Download failed'][]=$messages[0] ?? 'The download failed.';
                 elseif (in_array($state,['importPending','importing'],true)) $categories['Import pending'][]=$messages[0] ?? 'The episode is waiting for import.';
                 elseif ($state==='downloading') $categories['Currently downloading'][]='The episode is currently downloading.';
-                $queueRows[]=['title'=>$item['title']??'Queued release','state'=>$state,'messages'=>array_values(array_unique($messages)),'download_client'=>$item['downloadClient']??null];
+                $queueRows[]=[
+                    'title'=>$item['title']??'Queued release',
+                    'state'=>$state,
+                    'messages'=>array_values(array_unique($messages)),
+                    'download_client'=>$item['downloadClient']??null,
+                    'output_path'=>$item['outputPath']??$item['downloadPath']??null,
+                    'status'=>$item['status']??null,
+                    'tracked_status'=>$tracked,
+                ];
             }
         } catch (Throwable) {
         }
@@ -427,10 +451,20 @@ final class ArrService
                 $eventType=(string)($event['eventType'] ?? '');
                 $data=is_array($event['data']??null)?$event['data']:[];
                 if ($eventType==='downloadFailed') $categories['Download failed'][]=(string)($data['message']??'A previous download failed.');
+                $historyMessage=(string)($data['message']??'');
+                $historyLower=strtolower($historyMessage);
+                if ($historyMessage!=='') {
+                    if (str_contains($historyLower,'remote path mapping')) $categories['Remote path mapping'][]=$historyMessage;
+                    elseif ((str_contains($historyLower,'path')||str_contains($historyLower,'directory')) && (str_contains($historyLower,'does not exist')||str_contains($historyLower,'not found'))) $categories['Download path missing'][]=$historyMessage;
+                    elseif (str_contains($historyLower,'permission denied')||str_contains($historyLower,'access denied')) $categories['Path permissions'][]=$historyMessage;
+                }
                 $historyRows[]=[
                     'event_type'=>$eventType,'date'=>$event['date']??null,'source_title'=>$event['sourceTitle']??'',
                     'quality'=>$event['quality']['quality']['name']??null,'languages'=>$this->languageNames($event['languages']??[]),
-                    'message'=>$data['message']??null
+                    'message'=>$data['message']??null,
+                    'download_client'=>$data['downloadClient']??null,
+                    'dropped_path'=>$data['droppedPath']??$data['downloadPath']??null,
+                    'imported_path'=>$data['importedPath']??null,
                 ];
             }
         } catch (Throwable) {
@@ -468,6 +502,13 @@ final class ArrService
     {
         if(empty($episode['monitored'])) return ['label'=>'Episode is not monitored','severity'=>'warning','detail'=>'Sonarr will not automatically grab this episode until monitoring is enabled.'];
         if(!empty($categories['Not aired yet'])) return ['label'=>'Not aired yet','severity'=>'info','detail'=>'This episode has not aired yet.'];
+        foreach(['Remote path mapping','Download path missing','Path permissions','Download client'] as $pathCategory){
+            if(!empty($categories[$pathCategory])) return [
+                'label'=>$pathCategory,
+                'severity'=>'bad',
+                'detail'=>(string)$categories[$pathCategory][0]
+            ];
+        }
         foreach($queue as $item){
             if(($item['state']??'')==='importBlocked') return ['label'=>'Import blocked','severity'=>'bad','detail'=>$item['messages'][0]??'Sonarr cannot import the completed download.'];
             if(in_array(($item['state']??''),['failed','failedPending'],true)) return ['label'=>'Download failed','severity'=>'bad','detail'=>$item['messages'][0]??'The episode download failed.'];
