@@ -87,6 +87,17 @@ function reveal_instance(array $instance): array
     return $instance;
 }
 
+
+function audio_has_preferred_language(?string $audio, array $preferred): bool
+{
+    if (!$audio || !$preferred) return true;
+    $lower = strtolower($audio);
+    foreach ($preferred as $language) {
+        if ($language !== '' && str_contains($lower, strtolower($language))) return true;
+    }
+    return false;
+}
+
 function viewer_can_see_vod(array $user): bool
 {
     if (($user['role'] ?? '') === 'admin') return true;
