@@ -69,7 +69,7 @@ INSERT INTO instances(name,type,url,api_key) VALUES('Legacy Radarr','radarr','ht
 unset($legacy);
 $upgraded=new Database($legacyPath);
 $up=$upgraded->pdo;
-foreach(['tmdb_id','minimum_availability','availability_date','details_json'] as $col) ok(in_array($col,columns($up,'movies'),true),"upgrade adds movies.{$col}");
+foreach(['tmdb_id','minimum_availability','availability_date','details_json','movie_file_json'] as $col) ok(in_array($col,columns($up,'movies'),true),"upgrade adds movies.{$col}");
 foreach(['tmdb_id','details_json','language_inconsistent'] as $col) ok(in_array($col,columns($up,'series'),true),"upgrade adds series.{$col}");
 foreach(['source','cancel_requested','heartbeat_at'] as $col) ok(in_array($col,columns($up,'sync_jobs'),true),"upgrade adds sync_jobs.{$col}");
 ok((int)$up->query("SELECT COUNT(*) FROM vod_mappings")->fetchColumn()===0,'upgrade creates VOD mappings table');
