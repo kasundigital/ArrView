@@ -28,7 +28,7 @@ $baseAppUrl = $scheme . '://' . $host;
         <a href="/?type=movies">Movies</a>
         <a href="/?type=series">Series</a>
         <a class="active" href="/support.php">Support</a>
-        <?php if($currentUser['role']==='admin'):?><a href="/admin.php">Admin</a><?php endif;?>
+        <?php if($currentUser['role']==='admin'):?><a href="/admin.php">Admin</a><a href="/system.php">System</a><?php endif;?>
         <span class="user-chip"><?=e($currentUser['username'])?></span>
         <a href="/logout.php">Logout</a>
     </nav>

@@ -4,6 +4,9 @@ $currentUser = $auth->requireLogin();
 
 $id = (int)($_GET['id'] ?? 0);
 $deep = ($_GET['deep'] ?? '') === '1';
+$refresh = ($_GET['refresh'] ?? '') === '1';
+$cacheTtl = max(1, (int)app_setting('diagnostic_cache_ttl_minutes','15'));
+$cacheInfo = null;
 $stmt = $pdo->prepare('SELECT m.*, i.name instance_name, i.type instance_type, i.url, i.api_key, i.enabled FROM movies m JOIN instances i ON i.id=m.instance_id WHERE m.id=?');
 $stmt->execute([$id]);
 $movie = $stmt->fetch();
@@ -85,17 +88,27 @@ if ($movieState['key'] === 'available') {
         ],
     ];
 } else {
-    try {
-        $result = $arr->diagnoseMissingMovie([
-            'id'=>$movie['instance_id'],
-            'name'=>$movie['instance_name'],
-            'type'=>$movie['instance_type'],
-            'url'=>$movie['url'],
-            'api_key'=>$movie['api_key'],
-            'enabled'=>$movie['enabled'],
-        ], (int)$movie['remote_id'], $deep);
-    } catch (Throwable $e) {
-        $error = $e->getMessage();
+    $cacheKey = 'movie:' . (int)$movie['instance_id'] . ':' . (int)$movie['remote_id'] . ':' . ($deep ? 'deep' : 'light');
+    if (!$refresh) {
+        $cacheInfo = diagnostic_cache_read($cacheKey, $cacheTtl);
+        if ($cacheInfo) $result = $cacheInfo['payload'];
+    }
+    if (!$result) {
+        try {
+            $instance = reveal_instance([
+                'id'=>$movie['instance_id'],
+                'name'=>$movie['instance_name'],
+                'type'=>$movie['instance_type'],
+                'url'=>$movie['url'],
+                'api_key'=>$movie['api_key'],
+                'enabled'=>$movie['enabled'],
+            ]);
+            $result = $arr->diagnoseMissingMovie($instance, (int)$movie['remote_id'], $deep);
+            diagnostic_cache_write($cacheKey, $result);
+            $cacheInfo = ['checked_at'=>gmdate('Y-m-d H:i:s'),'age_seconds'=>0,'payload'=>$result];
+        } catch (Throwable $e) {
+            $error = $e->getMessage();
+        }
     }
 }
 ?>
@@ -114,7 +127,7 @@ if ($movieState['key'] === 'available') {
     <a href="/?type=movies">Movies</a>
     <a href="/?type=series">Series</a>
     <a href="/support.php">Support</a>
-    <?php if($currentUser['role']==='admin'):?><a href="/admin.php">Admin</a><?php endif;?>
+    <?php if($currentUser['role']==='admin'):?><a href="/admin.php">Admin</a><a href="/system.php">System</a><?php endif;?>
     <span class="user-chip"><?=e($currentUser['username'])?></span>
     <a href="/logout.php">Logout</a>
   </nav>
@@ -131,6 +144,12 @@ if ($movieState['key'] === 'available') {
 </section>
 
 <div class="notice info"><?=$deep?'Deep Search is querying enabled Radarr indexers. ArrView does not grab or modify releases.':'Light check reads Radarr state, queue, history and blocklist only. Indexers are not searched unless you choose Deep Search.'?></div>
+<?php if($cacheInfo):?>
+<div class="diagnostic-cache-bar">
+  <div><strong><?=$cacheInfo['age_seconds']>0?'Cached diagnostic':'Fresh diagnostic'?></strong><span>Checked <?=e((string)$cacheInfo['checked_at'])?> · <?=number_format((int)$cacheInfo['age_seconds'])?>s old · TTL <?=$cacheTtl?> min</span></div>
+  <a class="table-action" href="/diagnose.php?id=<?=$id?><?=$deep?'&deep=1':''?>&refresh=1">Refresh now</a>
+</div>
+<?php endif;?>
 
 <?php if($error):?>
   <div class="notice error"><strong>Diagnostic failed:</strong> <?=e($error)?></div>

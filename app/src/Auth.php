@@ -7,6 +7,8 @@ final class Auth
     private const IDLE_TIMEOUT = 43200; // 12 hours
     private const MAX_LOGIN_FAILURES = 5;
     private const LOGIN_LOCK_SECONDS = 60;
+    private const SERVER_LOCK_BASE_SECONDS = 300;
+    private const SERVER_LOCK_MAX_SECONDS = 3600;
 
     public function __construct(private PDO $pdo)
     {
@@ -57,11 +59,25 @@ final class Auth
 
     public function login(string $username, string $password): bool
     {
+        $username = trim($username);
         $lockedUntil = (int)($_SESSION['login_locked_until'] ?? 0);
         if ($lockedUntil > time()) return false;
 
+        $attemptKey = $this->attemptKey($username);
+        $serverAttempt = $this->pdo->prepare('SELECT failures,locked_until FROM login_attempts WHERE attempt_key=? LIMIT 1');
+        $serverAttempt->execute([$attemptKey]);
+        $attempt = $serverAttempt->fetch();
+        if ($attempt && !empty($attempt['locked_until'])) {
+            try {
+                if (new DateTimeImmutable((string)$attempt['locked_until']) > new DateTimeImmutable('now', new DateTimeZone('UTC'))) {
+                    return false;
+                }
+            } catch (Throwable) {
+            }
+        }
+
         $stmt = $this->pdo->prepare('SELECT * FROM users WHERE username=? AND enabled=1 LIMIT 1');
-        $stmt->execute([trim($username)]);
+        $stmt->execute([$username]);
         $user = $stmt->fetch();
 
         if (!$user || !password_verify($password, $user['password_hash'])) {
@@ -71,6 +87,20 @@ final class Auth
                 $_SESSION['login_locked_until'] = time() + self::LOGIN_LOCK_SECONDS;
                 $_SESSION['login_failures'] = 0;
             }
+
+            $existingFailures = (int)($attempt['failures'] ?? 0) + 1;
+            $lockUntil = null;
+            if ($existingFailures >= self::MAX_LOGIN_FAILURES) {
+                $steps = max(0, $existingFailures - self::MAX_LOGIN_FAILURES);
+                $seconds = min(self::SERVER_LOCK_MAX_SECONDS, self::SERVER_LOCK_BASE_SECONDS * (2 ** min($steps, 4)));
+                $lockUntil = gmdate('Y-m-d H:i:s', time() + $seconds);
+            }
+            $this->pdo->prepare(
+                "INSERT INTO login_attempts(attempt_key,failures,first_failed_at,last_failed_at,locked_until)
+                 VALUES(?,?,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,?)
+                 ON CONFLICT(attempt_key) DO UPDATE SET
+                   failures=excluded.failures,last_failed_at=CURRENT_TIMESTAMP,locked_until=excluded.locked_until"
+            )->execute([$attemptKey, $existingFailures, $lockUntil]);
             return false;
         }
 
@@ -78,8 +108,29 @@ final class Auth
         $_SESSION['user_id'] = (int)$user['id'];
         $_SESSION['last_activity'] = time();
         unset($_SESSION['login_failures'], $_SESSION['login_locked_until']);
+        $this->pdo->prepare('DELETE FROM login_attempts WHERE attempt_key=?')->execute([$attemptKey]);
         $_SESSION['csrf_token'] = bin2hex(random_bytes(32));
         return true;
+    }
+
+
+    public function loginLockSeconds(string $username): int
+    {
+        $stmt = $this->pdo->prepare('SELECT locked_until FROM login_attempts WHERE attempt_key=? LIMIT 1');
+        $stmt->execute([$this->attemptKey(trim($username))]);
+        $value = $stmt->fetchColumn();
+        if (!$value) return max(0, (int)($_SESSION['login_locked_until'] ?? 0) - time());
+        try {
+            return max(0, (new DateTimeImmutable((string)$value))->getTimestamp() - time());
+        } catch (Throwable) {
+            return 0;
+        }
+    }
+
+    private function attemptKey(string $username): string
+    {
+        $ip = (string)($_SERVER['REMOTE_ADDR'] ?? 'unknown');
+        return hash('sha256', strtolower(trim($username)) . '|' . $ip);
     }
 
     public function logout(): void

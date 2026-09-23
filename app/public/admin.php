@@ -41,7 +41,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $apiKey = trim($_POST['api_key'] ?? '');
             if ($name === '' || !in_array($type, ['radarr','sonarr'], true) || $url === '' || $apiKey === '') throw new RuntimeException('All fields are required.');
             $stmt = $pdo->prepare('INSERT INTO instances(name,type,url,api_key,webhook_token) VALUES(?,?,?,?,?)');
-            $stmt->execute([$name,$type,rtrim($url,'/'),$apiKey,bin2hex(random_bytes(24))]);
+            $stmt->execute([$name,$type,rtrim($url,'/'),$secret->protect($apiKey),bin2hex(random_bytes(24))]);
             $message = 'Instance added.';
         } elseif ($action === 'delete') {
             $stmt = $pdo->prepare('DELETE FROM instances WHERE id=?'); $stmt->execute([(int)($_POST['id'] ?? 0)]); $message='Instance deleted.';
@@ -50,6 +50,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         } elseif ($action === 'test') {
             $stmt = $pdo->prepare('SELECT * FROM instances WHERE id=?'); $stmt->execute([(int)($_POST['id'] ?? 0)]); $instance=$stmt->fetch();
             if (!$instance) throw new RuntimeException('Instance not found.');
+            $instance = reveal_instance($instance);
             $result = $arr->test($instance);
             if (!$result['ok']) throw new RuntimeException($result['message']);
             $message = $result['message'];
@@ -75,9 +76,10 @@ $host = preg_replace('/[^A-Za-z0-9.\-:\[\]]/', '', (string)($_SERVER['HTTP_HOST'
 $baseAppUrl = $scheme . '://' . $host;
 ?>
 <!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Admin · ArrView</title><link rel="stylesheet" href="/assets/style.css"></head><body>
-<header class="topbar"><a class="brand" href="/">ArrView <small class="version-chip">v<?=e(ARRVIEW_VERSION)?></small></a><nav><a href="/">Library</a><a class="active" href="/admin.php">Instances</a><a href="/users.php">Users</a><a href="/support.php">Support</a><span class="user-chip"><?=e($currentUser['username'])?></span><a href="/logout.php">Logout</a></nav></header>
+<header class="topbar"><a class="brand" href="/">ArrView <small class="version-chip">v<?=e(ARRVIEW_VERSION)?></small></a><nav><a href="/">Library</a><a class="active" href="/admin.php">Instances</a><a href="/users.php">Users</a><a href="/system.php">System</a><a href="/support.php">Support</a><span class="user-chip"><?=e($currentUser['username'])?></span><a href="/logout.php">Logout</a></nav></header>
 <main class="wrap admin-wrap"><section class="catalog-head"><div><p class="eyebrow">SETTINGS</p><h1>Instances</h1></div></section>
 <?php if($message):?><div class="notice success"><?=e($message)?></div><?php endif;?><?php if($error):?><div class="notice error"><?=e($error)?></div><?php endif;?>
+<?php if(!empty($metadataSettings['credential_error'])):?><div class="notice error"><strong>TMDB credential unavailable:</strong> <?=e($metadataSettings['credential_error'])?> Configure the same ARRVIEW_ENCRYPTION_KEY used when encryption was enabled.</div><?php endif;?>
 <section class="panel metadata-panel">
   <div class="panel-heading-inline metadata-panel-head">
     <div><p class="eyebrow">METADATA</p><h2>TMDB Metadata</h2></div>
@@ -135,7 +137,7 @@ $baseAppUrl = $scheme . '://' . $host;
 
 <section class="panel"><h2>Add Radarr / Sonarr</h2><form method="post" class="instance-form"><?=csrf_field()?> <input type="hidden" name="action" value="add"><label>Name<input name="name" placeholder="Radarr Main" required></label><label>Type<select name="type"><option value="radarr">Radarr</option><option value="sonarr">Sonarr</option></select></label><label>URL<input name="url" placeholder="http://192.168.1.10:7878" required></label><label>API Key<input name="api_key" type="password" placeholder="API key" required></label><button class="primary" type="submit">Add Instance</button></form></section>
 <section class="panel"><h2>Public / VOD Link</h2>
-<p class="muted">Map your local media path to a public streaming URL. ArrView will URL-encode folders and filenames automatically and show Open/Copy links on media details pages.</p>
+<p class="muted">Legacy single VOD mapping. For multiple roots, per-instance mappings and viewer VOD permissions, use <a href="/system.php">System → VOD Path Mappings</a>.</p>
 <form method="post" class="instance-form public-link-form">
 <?=csrf_field()?> <input type="hidden" name="action" value="save_public_link">
 <label>Local media root<input name="public_local_root" value="<?=e($publicLocalRoot)?>" placeholder="/mnt/media/Movies"></label>
@@ -174,6 +176,7 @@ $baseAppUrl = $scheme . '://' . $host;
           <a class="table-action" href="/instance-edit.php?id=<?=(int)$instance['id']?>">Edit</a>
           <form method="post"><?=csrf_field()?> <input type="hidden" name="action" value="test"><input type="hidden" name="id" value="<?=(int)$instance['id']?>"><button type="submit">Test</button></form>
           <button type="button" class="primary sync-btn" data-instance-id="<?=(int)$instance['id']?>">Sync Now</button>
+          <button type="button" class="danger-button sync-cancel-card-btn" data-job-id="" hidden>Cancel</button>
           <form method="post"><?=csrf_field()?> <input type="hidden" name="action" value="toggle"><input type="hidden" name="id" value="<?=(int)$instance['id']?>"><button type="submit"><?=$instance['enabled']?'Disable':'Enable'?></button></form>
           <form method="post" onsubmit="return confirm('Delete this instance and its cached media?')"><?=csrf_field()?> <input type="hidden" name="action" value="delete"><input type="hidden" name="id" value="<?=(int)$instance['id']?>"><button type="submit" class="danger">Delete</button></form>
         </div>
@@ -212,8 +215,9 @@ $baseAppUrl = $scheme . '://' . $host;
 <script>
 const sleep=ms=>new Promise(r=>setTimeout(r,ms));
 async function pollSync(jobId,row,button){
-  const box=row.querySelector('.sync-progress'),count=row.querySelector('.sync-count'),percent=row.querySelector('.sync-percent'),fill=row.querySelector('.sync-fill'),current=row.querySelector('.sync-current');
+  const box=row.querySelector('.sync-progress'),count=row.querySelector('.sync-count'),percent=row.querySelector('.sync-percent'),fill=row.querySelector('.sync-fill'),current=row.querySelector('.sync-current'),cancel=row.querySelector('.sync-cancel-card-btn');
   box.hidden=false; button.disabled=true; button.textContent='Syncing...';
+  if(cancel){cancel.hidden=false;cancel.dataset.jobId=jobId;}
   while(true){
     try{
       const r=await fetch('/sync-status.php?job_id='+encodeURIComponent(jobId),{cache:'no-store'}); const d=await r.json();
@@ -221,8 +225,9 @@ async function pollSync(jobId,row,button){
       const c=Number(d.current||0),t=Number(d.total||0),p=Math.max(0,Math.min(100,Number(d.percent||0)));
       count.textContent=t>0?`${c.toLocaleString()} / ${t.toLocaleString()}`:`${c.toLocaleString()} items`;
       percent.textContent=p.toFixed(p%1?1:0)+'%'; fill.style.width=p+'%'; current.textContent=d.title||d.message||'Working...';
-      if(d.status==='completed'){button.disabled=false;button.textContent='Sync Again';current.textContent=d.message||'Sync completed';break;}
-      if(d.status==='failed'){button.disabled=false;button.textContent='Retry Sync';box.classList.add('failed');current.textContent=d.message||'Sync failed';break;}
+      if(d.status==='completed'){button.disabled=false;button.textContent='Sync Again';if(cancel)cancel.hidden=true;current.textContent=d.message||'Sync completed';break;}
+      if(d.status==='cancelled'){button.disabled=false;button.textContent='Sync Again';if(cancel)cancel.hidden=true;box.classList.add('failed');current.textContent=d.message||'Sync cancelled';break;}
+      if(d.status==='failed'){button.disabled=false;button.textContent='Retry Sync';if(cancel)cancel.hidden=true;box.classList.add('failed');current.textContent=d.message||'Sync failed';break;}
     }catch(e){current.textContent=e.message||'Progress check failed';}
     await sleep(750);
   }
@@ -236,6 +241,18 @@ for(const button of document.querySelectorAll('.sync-btn')){
     }catch(e){button.disabled=false;button.textContent='Retry Sync';row.querySelector('.sync-current').textContent=e.message||'Could not start sync';box.classList.add('failed');}
   });
 }
+
+document.querySelectorAll('.sync-cancel-card-btn').forEach(btn=>btn.addEventListener('click',async()=>{
+  if(!btn.dataset.jobId||!confirm('Stop this running sync?'))return;
+  btn.disabled=true;btn.textContent='Cancelling...';
+  try{
+    const body=new URLSearchParams({job_id:btn.dataset.jobId,csrf_token:'<?=e($auth->csrfToken())?>'});
+    const r=await fetch('/sync-cancel.php',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body});
+    const d=await r.json();if(!d.ok)throw new Error(d.message||'Could not cancel sync');
+    btn.textContent='Cancel requested';
+  }catch(e){btn.disabled=false;btn.textContent='Cancel';alert(e.message);}
+}));
+
 const metadataButton=document.querySelector('.metadata-sync-btn');
 if(metadataButton){
   metadataButton.addEventListener('click',async()=>{

@@ -8,6 +8,7 @@ on:
       - "Dockerfile"
       - "docker-compose.yml"
       - ".github/workflows/docker-publish.yml"
+      - "tests/**"
   push:
     branches: ["main"]
     tags: ["v*.*.*"]
@@ -16,6 +17,7 @@ on:
       - "Dockerfile"
       - "docker-compose.yml"
       - ".github/workflows/docker-publish.yml"
+      - "tests/**"
   workflow_dispatch:
 
 permissions:
@@ -32,9 +34,33 @@ jobs:
           docker run --rm -v "$PWD/app:/app:ro" php:8.3-cli-alpine sh -lc \
             "find /app -name '*.php' -print0 | xargs -0 -n1 php -l"
 
+
+  regression:
+    needs: lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build regression image
+        run: docker build -t arrview-ci .
+      - name: Database migration, stress, encryption and recovery tests
+        run: docker run --rm -v "$PWD/tests:/tests:ro" arrview-ci php /tests/run.php
+      - name: Fresh install, sync, webhook and restart persistence tests
+        run: |
+          chmod +x tests/smoke.sh
+          ./tests/smoke.sh
+      - name: Security regression checks
+        run: |
+          set -eu
+          ! grep -R --line-number -E 'echo .*api_key|print.*api_key' app/public
+          grep -q "POST required" app/public/logout.php
+          grep -q "hash_equals" app/public/webhook.php
+          grep -q "login_attempts" app/src/Auth.php
+          grep -q "cookie_httponly" app/src/Auth.php
+          grep -q "cookie_samesite" app/src/Auth.php
+
   docker:
     if: github.event_name != 'pull_request'
-    needs: lint
+    needs: [lint, regression]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

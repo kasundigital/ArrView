@@ -4,6 +4,7 @@ declare(strict_types=1);
 require_once dirname(__DIR__) . '/src/Database.php';
 require_once dirname(__DIR__) . '/src/BatchSyncService.php';
 require_once dirname(__DIR__) . '/src/MetadataService.php';
+require_once dirname(__DIR__) . '/src/SecretService.php';
 
 $payloadFile = (string)($argv[1] ?? '');
 if ($payloadFile === '' || !is_file($payloadFile)) exit(1);
@@ -23,13 +24,15 @@ try {
     $instance = $stmt->fetch();
     if (!$instance) exit(3);
 
+    $secret = new SecretService($pdo);
+    $instance['api_key'] = $secret->reveal((string)$instance['api_key']);
     $sync = new BatchSyncService($pdo);
     $result = $sync->syncWebhookEvent($instance, $event);
 
     // Refresh TMDB metadata only for the affected movie/series. Failures here must
     // never cause the Arr webhook sync itself to fail.
     try {
-        $metadata = new MetadataService($pdo);
+        $metadata = new MetadataService($pdo, $secret);
         if (($instance['type'] ?? '') === 'radarr') {
             $remoteId = (int)($event['movie']['id'] ?? $event['movieId'] ?? 0);
             if ($remoteId > 0) {

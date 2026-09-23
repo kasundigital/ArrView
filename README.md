@@ -11,7 +11,7 @@
 <p align="center">
   <a href="https://github.com/kasundigital/ArrView/stargazers"><img alt="GitHub Stars" src="https://img.shields.io/github/stars/kasundigital/ArrView?style=for-the-badge"></a>
   <a href="https://github.com/kasundigital/ArrView/pkgs/container/arrview"><img alt="GHCR" src="https://img.shields.io/badge/GHCR-arrview-blue?style=for-the-badge&logo=docker"></a>
-  <a href="https://github.com/kasundigital/ArrView"><img alt="Version" src="https://img.shields.io/badge/version-v0.12.0-7c9cff?style=for-the-badge"></a>
+  <a href="https://github.com/kasundigital/ArrView"><img alt="Version" src="https://img.shields.io/badge/version-v1.0.0-7c9cff?style=for-the-badge"></a>
   <a href="https://buymeacoffee.com/kasundigital"><img alt="Buy Me a Coffee" src="https://img.shields.io/badge/Buy%20Me%20a%20Coffee-Support%20ArrView-FFDD00?style=for-the-badge&logo=buymeacoffee&logoColor=000000"></a>
 </p>
 
@@ -46,7 +46,45 @@ Typical columns include:
 
 ---
 
+## 📸 Screenshots
+
+### Large-library view
+
+<p align="center">
+  <img src="docs/screenshots/library-v1.svg" alt="ArrView v1 large-library view with pagination, availability states, sorting, and audio filters" width="100%">
+</p>
+
+### System administration
+
+<p align="center">
+  <img src="docs/screenshots/system-v1.svg" alt="ArrView v1 System page with scheduling, security, backup, VOD, and sync history" width="100%">
+</p>
+
+---
+
 ## ✨ Features
+
+### ✅ v1.0 Stable operations
+
+ArrView 1.0 adds the operational controls needed for long-running self-hosted deployments:
+
+- Database-backed pagination for large movie and series libraries
+- Sortable library columns with search, instance, year, status, and audio-language filters
+- Independent scheduled full-sync worker with configurable intervals
+- Incremental Radarr/Sonarr webhook updates
+- Sync history, live progress, and administrator cancellation
+- SQLite backup download and validated restore with a pre-restore safety snapshot
+- Persistent server-side login throttling
+- Optional libsodium encryption at rest for Radarr/Sonarr and personal TMDB credentials
+- Multiple global/per-instance VOD path mappings
+- Viewer permission control for VOD links
+- Preferred audio-language rules and warnings
+- Mixed-language series inconsistency detection
+- Diagnostic cache TTL display and explicit refresh controls
+- Responsive mobile episode cards
+- Automated fresh-install, upgrade, 50k-library stress, webhook, restart, recovery, and security regression tests
+
+The new **System** page centralizes sync scheduling/history, VOD mappings, language policy, backup/restore, and security controls.
 
 ### 🎬 Radarr movie monitoring
 
@@ -87,9 +125,16 @@ Series:
 
 - **All**
 - **Missing**
+- **Aired Missing**
 - **Complete**
+- **Future**
+- **Mixed Languages**
+- **Preferred Language Warnings**
+- **Unmonitored**
 - **Missing Audio Info**
 - **Monitored**
+
+Both Movies and Series can also be filtered by a **specific cached audio language**.
 
 Every filter includes a count so you can immediately see where attention is needed.
 
@@ -125,6 +170,9 @@ ArrView is designed for large libraries.
 - Percentage progress
 - Current movie or series name
 - Background sync jobs
+- Configurable scheduled full sync even when nobody is browsing ArrView
+- Sync history and cancel controls
+- Pagination tested with a 50,000-movie dataset
 
 Example:
 
@@ -141,8 +189,9 @@ ArrView includes authentication with two roles:
 **Admin**
 
 - Manage Radarr/Sonarr instances
-- Run/test syncs
+- Run/test/cancel syncs and inspect sync history
 - Manage users
+- Configure scheduling, backups, VOD mappings, language rules, and security
 - Access the full library
 
 **Viewer**
@@ -161,6 +210,39 @@ You can also filter the library by a specific instance.
 
 ---
 
+
+## ⚙️ System administration
+
+Open **System** as an administrator to configure:
+
+- Automatic full-sync interval or disable scheduled full sync
+- Default library page size
+- Diagnostic cache TTL
+- Preferred audio-language list and warnings
+- Viewer VOD permission
+- Multiple global or per-instance VOD mappings
+- Optional API credential encryption at rest
+- Backup download and restore
+- Recent sync history and cancellation
+
+### Optional credential encryption
+
+Set a stable encryption key before enabling encryption:
+
+```yaml
+environment:
+  ARRVIEW_ENCRYPTION_KEY: "your-long-random-secret"
+```
+
+A 32-byte random key is recommended. For example:
+
+```bash
+openssl rand -hex 32
+```
+
+Restart ArrView, then enable encryption from **System → API-key encryption at rest**. Back up the key separately; encrypted credentials cannot be recovered without it.
+
+---
 
 ## 🎞️ TMDB Metadata
 
@@ -286,6 +368,8 @@ services:
     environment:
       TZ: Asia/Colombo
       ARRVIEW_DATA: /app/data
+      # Optional, only if encryption-at-rest is enabled:
+      ARRVIEW_ENCRYPTION_KEY: ${ARRVIEW_ENCRYPTION_KEY:-}
     volumes:
       - arrview-data:/app/data
 
@@ -338,6 +422,8 @@ ArrView is intentionally lightweight:
 - **Sonarr API**
 - No external database required
 - No Node.js runtime required
+- Independent lightweight PHP scheduler process inside the container
+- Automated SQLite migrations for existing installations
 
 Persistent data:
 
@@ -370,27 +456,7 @@ Supported architectures:
 
 ## 🗺️ Roadmap
 
-ArrView is under active development. Planned improvements include:
-
-- Sonarr episode-level **Why Missing?** diagnostics
-- More detailed Radarr queue/import diagnostics
-- Better language analytics
-- Filter by specific audio language
-- Multi-language / preferred-language warnings
-- Per-season Sonarr language information
-- Missing-episode drill-down
-- Sortable table columns
-- Pagination for very large libraries
-- Scheduled automatic sync
-- Radarr/Sonarr webhook updates
-- Poster/details drawer without losing the compact table
-- Health/status page
-- Improved mobile table experience
-- More diagnostic categories
-- Optional notifications
-- Import/path-mapping troubleshooting
-
-Have an idea? Open an issue or discussion on GitHub.
+ArrView v1.0.0 is the stable baseline. Completed v1 work and future ideas are tracked in [ROADMAP.md](ROADMAP.md). Release history is in [CHANGELOG.md](CHANGELOG.md), and security guidance is in [SECURITY.md](SECURITY.md).
 
 ---
 
@@ -452,7 +518,7 @@ And if you cannot contribute financially, a **GitHub ⭐ star**, issue report, p
 
 ArrView is self-hosted.
 
-Your Radarr/Sonarr URLs, API keys, users, and cached library metadata stay in your own ArrView installation unless you choose to expose or share them.
+Your Radarr/Sonarr URLs, API keys, users, and cached library metadata stay in your own ArrView installation unless you choose to expose or share them. API-key encryption at rest is optional and can be enabled from System after configuring ARRVIEW_ENCRYPTION_KEY.
 
 For security, avoid exposing ArrView directly to the public internet without appropriate authentication, HTTPS, firewall rules, and/or a trusted reverse proxy.
 

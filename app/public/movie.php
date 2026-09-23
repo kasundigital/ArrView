@@ -89,33 +89,16 @@ $timeline = [
 ];
 $history = [];
 
-$settings = [];
-foreach ($pdo->query("SELECT setting_key,setting_value FROM app_settings WHERE setting_key IN ('public_local_root','public_base_url')")->fetchAll() as $row) {
-    $settings[$row['setting_key']] = $row['setting_value'];
-}
-$publicLocalRoot = rtrim((string)($settings['public_local_root'] ?? ''), "/\\");
-$publicBaseUrl = rtrim((string)($settings['public_base_url'] ?? ''), '/');
-
-function buildPublicMediaUrl(?string $filePath, string $localRoot, string $baseUrl): ?string {
-    if (!$filePath || $localRoot === '' || $baseUrl === '') return null;
-
-    $normalizedPath = str_replace('\\', '/', $filePath);
-    $normalizedRoot = rtrim(str_replace('\\', '/', $localRoot), '/');
-
-    if ($normalizedRoot !== '' && str_starts_with($normalizedPath, $normalizedRoot)) {
-        $relative = ltrim(substr($normalizedPath, strlen($normalizedRoot)), '/');
-    } else {
-        return null;
-    }
-
-    if ($relative === '') return null;
-    $encoded = implode('/', array_map('rawurlencode', explode('/', $relative)));
-    return $baseUrl . '/' . $encoded;
-}
-
-$publicMediaUrl = buildPublicMediaUrl($file['path'] ?? null, $publicLocalRoot, $publicBaseUrl);
+$publicMediaUrl = viewer_can_see_vod($currentUser)
+    ? vod_url_for((int)$instance['id'], $file['path'] ?? null)
+    : null;
 $movieState = movie_availability_state($cached);
 $availabilityLabel = !empty($cached['availability_date']) ? dateLabel((string)$cached['availability_date']) : '—';
+$preferredLanguages = array_values(array_filter(array_map('trim', explode(',', (string)app_setting('preferred_audio_languages','')))));
+$preferredWarning = app_setting('preferred_language_warning','1') === '1'
+    && $preferredLanguages
+    && !empty($movie['has_file'])
+    && !audio_has_preferred_language($file['languages'] ?? $cached['audio_languages'] ?? null, $preferredLanguages);
 $folderYearMismatch = false;
 if (!empty($movie['path']) && !empty($movie['year']) && preg_match('/\((\d{4})\)\s*$/', (string)$movie['path'], $folderYearMatch)) {
     $folderYearMismatch = (int)$folderYearMatch[1] !== (int)$movie['year'];
@@ -136,7 +119,7 @@ if (!empty($movie['path']) && !empty($movie['year']) && preg_match('/\((\d{4})\)
         <a class="active" href="/?type=movies">Movies</a>
         <a href="/?type=series">Series</a>
         <a href="/support.php">Support</a>
-        <?php if($currentUser['role']==='admin'):?><a href="/admin.php">Admin</a><?php endif;?>
+        <?php if($currentUser['role']==='admin'):?><a href="/admin.php">Admin</a><a href="/system.php">System</a><?php endif;?>
         <span class="user-chip"><?=e($currentUser['username'])?></span>
         <a href="/logout.php">Logout</a>
     </nav>
@@ -170,6 +153,9 @@ if (!empty($movie['path']) && !empty($movie['year']) && preg_match('/\((\d{4})\)
         </div>
     </section>
 
+    <?php if($preferredWarning):?>
+    <div class="notice warning availability-notice"><strong>Preferred audio language not found.</strong> Preferred: <?=e(implode(', ', $preferredLanguages))?> · Cached audio: <?=e((string)($file['languages'] ?? $cached['audio_languages'] ?? 'Unknown'))?></div>
+    <?php endif;?>
     <?php if(($movieState['key'] ?? '')==='upcoming'):?>
     <div class="notice info availability-notice"><strong>Upcoming — not released yet.</strong> Radarr is monitoring this title for its future availability. It is not counted as a missing movie.</div>
     <?php elseif(($movieState['key'] ?? '')==='unknown'):?>
@@ -200,8 +186,8 @@ if (!empty($movie['path']) && !empty($movie['year']) && preg_match('/\((\d{4})\)
             </div>
         </div>
     </section>
-    <?php elseif($publicBaseUrl && $publicLocalRoot && !empty($file['path'])):?>
-    <div class="notice info">Public/VOD link is configured, but this file path does not start with the configured local media root.</div>
+    <?php elseif(!empty($file['path']) && $currentUser['role']==='admin'):?>
+    <div class="notice info">No VOD mapping matched this file path. Add or adjust mappings in <a href="/system.php">System → VOD Path Mappings</a>.</div>
     <?php endif;?>
 
     <?php if($tmdbId>0):?>

@@ -8,10 +8,11 @@ WORKDIR /app
 COPY app /app
 
 RUN find /app -name '*.php' -print0 | xargs -0 -n1 php -l \
+    && chmod +x /app/bin/entrypoint.sh \
     && mkdir -p /app/data \
     && chown -R www-data:www-data /app/data
 
 EXPOSE 8080
 
 USER www-data
-CMD ["php", "-S", "0.0.0.0:8080", "-t", "/app/public"]
+CMD ["/app/bin/entrypoint.sh"]
