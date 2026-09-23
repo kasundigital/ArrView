@@ -22,44 +22,9 @@ $batchSync = new BatchSyncService($pdo);
 $metadata = new MetadataService($pdo, $secret);
 $auth = new Auth($pdo);
 
-// Lightweight self-healing reconciliation: normal pages read SQLite only.
-// At most once every 12 hours per instance, queue a background full sync
-// to catch any changes that may have been missed by webhooks.
-if (PHP_SAPI !== 'cli') {
-    try {
-        $syncIntervalStmt = $pdo->prepare("SELECT setting_value FROM app_settings WHERE setting_key='sync_interval_hours' LIMIT 1");
-        $syncIntervalStmt->execute();
-        $syncIntervalHours = max(0, min(168, (int)($syncIntervalStmt->fetchColumn() ?: 12)));
-        $stale = $syncIntervalHours > 0
-            ? $pdo->query("SELECT id FROM instances
-                WHERE enabled=1
-                  AND (last_full_sync_at IS NULL OR datetime(last_full_sync_at) < datetime('now','-" . $syncIntervalHours . " hours'))")->fetchAll()
-            : [];
-
-        foreach ($stale as $row) {
-            $instanceId = (int)$row['id'];
-            $active = $pdo->prepare("SELECT id FROM sync_jobs
-                WHERE instance_id=? AND status IN ('queued','running')
-                ORDER BY id DESC LIMIT 1");
-            $active->execute([$instanceId]);
-            if ($active->fetchColumn()) continue;
-
-            $pdo->prepare("INSERT INTO sync_jobs(instance_id,status,message,source)
-                VALUES(?, 'queued', 'Automatic reconciliation queued', 'scheduled')")->execute([$instanceId]);
-            $jobId = (int)$pdo->lastInsertId();
-
-            $cmd = escapeshellarg(PHP_BINARY) . ' ' .
-                escapeshellarg(__DIR__ . '/bin/sync-job.php') . ' ' .
-                $jobId . ' > /tmp/arrview-sync-' . $jobId . '.log 2>&1 &';
-            exec($cmd);
-        }
-    } catch (Throwable) {
-        // Reconciliation must never block the UI.
-    }
-}
-
-
-
+// Scheduled full reconciliation is owned exclusively by /app/bin/scheduler.php.
+// Web requests must remain read-focused and must never spawn a competing full-sync worker.
+// Webhooks still launch their own targeted background workers when events arrive.
 
 function app_setting(string $key, ?string $default = null): ?string
 {
