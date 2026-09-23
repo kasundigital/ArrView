@@ -153,6 +153,7 @@ SQL;
                 }
 
                 $languages = [];
+                $languageProfiles = [];
                 $seenEpisodes = [];
                 $actualFileCount = 0;
                 $airedMissingCount = 0;
@@ -207,9 +208,13 @@ SQL;
                         $languageText = $this->audioLanguages($file);
                         if ($hasFile && !$languageText) $missingAudioCount++;
                         if ($languageText) {
-                            foreach (array_map('trim', explode(',', $languageText)) as $language) {
+                            $profileParts = array_values(array_filter(array_map('trim', explode(',', $languageText))));
+                            foreach ($profileParts as $language) {
                                 if ($language !== '') $languages[$language] = true;
                             }
+                            $profileParts = array_map('strtolower', $profileParts);
+                            sort($profileParts, SORT_NATURAL | SORT_FLAG_CASE);
+                            if ($profileParts) $languageProfiles[implode('|', $profileParts)] = true;
                         }
 
                         $mediaInfo = is_array($file['mediaInfo'] ?? null) ? $file['mediaInfo'] : [];
@@ -266,6 +271,7 @@ SQL;
                             $airedMissingCount,
                             $futureMissingCount,
                             $missingAudioCount,
+                            count($languageProfiles) > 1 ? 1 : 0,
                             $seriesLocalId,
                         ]);
                     }
@@ -445,6 +451,7 @@ SQL;
             $episodeStmt = $this->pdo->prepare($episodeSql);
             $seen = [];
             $languages = [];
+            $languageProfiles = [];
             $fileCount = 0;
             $airedMissingCount = 0;
             $futureMissingCount = 0;
@@ -472,9 +479,13 @@ SQL;
                 $languageText = $this->audioLanguages($file);
                 if ($hasFile && !$languageText) $missingAudioCount++;
                 if ($languageText) {
-                    foreach (array_map('trim', explode(',', $languageText)) as $language) {
+                    $profileParts = array_values(array_filter(array_map('trim', explode(',', $languageText))));
+                    foreach ($profileParts as $language) {
                         if ($language !== '') $languages[$language] = true;
                     }
+                    $profileParts = array_map('strtolower', $profileParts);
+                    sort($profileParts, SORT_NATURAL | SORT_FLAG_CASE);
+                    if ($profileParts) $languageProfiles[implode('|', $profileParts)] = true;
                 }
 
                 $mediaInfo = is_array($file['mediaInfo'] ?? null) ? $file['mediaInfo'] : [];
@@ -516,8 +527,8 @@ SQL;
             $names = array_keys($languages);
             natcasesort($names);
             $audioLanguages = $names ? implode(', ', $names) : null;
-            $update = $this->pdo->prepare('UPDATE series SET audio_languages=?,episode_file_count=?,aired_missing_count=?,future_missing_count=?,missing_audio_count=? WHERE id=?');
-            $update->execute([$audioLanguages,$fileCount,$airedMissingCount,$futureMissingCount,$missingAudioCount,$seriesLocalId]);
+            $update = $this->pdo->prepare('UPDATE series SET audio_languages=?,episode_file_count=?,aired_missing_count=?,future_missing_count=?,missing_audio_count=?,language_inconsistent=? WHERE id=?');
+            $update->execute([$audioLanguages,$fileCount,$airedMissingCount,$futureMissingCount,$missingAudioCount,count($languageProfiles)>1?1:0,$seriesLocalId]);
             $this->pdo->commit();
         } catch (Throwable $e) {
             if ($this->pdo->inTransaction()) $this->pdo->rollBack();
