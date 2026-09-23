@@ -76,6 +76,7 @@ CREATE TABLE IF NOT EXISTS movies (
     language_inconsistent INTEGER NOT NULL DEFAULT 0,
     path TEXT NULL,
     file_size INTEGER NULL,
+    movie_file_json TEXT NULL,
     details_json TEXT NULL,
     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     UNIQUE(instance_id, remote_id),
@@ -302,6 +303,9 @@ SQL);
         $movieColumnNames = array_column($this->pdo->query('PRAGMA table_info(movies)')->fetchAll(), 'name');
         if (!in_array('details_json', $movieColumnNames, true)) {
             $this->pdo->exec('ALTER TABLE movies ADD COLUMN details_json TEXT NULL');
+        }
+        if (!in_array('movie_file_json', $movieColumnNames, true)) {
+            $this->pdo->exec('ALTER TABLE movies ADD COLUMN movie_file_json TEXT NULL');
         }
         if (!in_array('tmdb_id', $movieColumnNames, true)) {
             $this->pdo->exec('ALTER TABLE movies ADD COLUMN tmdb_id INTEGER NULL');
