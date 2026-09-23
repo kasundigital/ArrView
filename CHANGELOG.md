@@ -2,6 +2,16 @@
 
 All notable ArrView changes are documented here.
 
+## [1.0.1] - 2026-09-23
+
+### Hotfix
+
+- Fixed a post-login blank/white dashboard caused by duplicate automatic-sync scheduling from web requests competing with the dedicated scheduler.
+- Automatic scheduled full sync is now owned only by the container scheduler; normal web requests no longer spawn reconciliation workers.
+- Added a 10-second SQLite busy timeout so short background writes do not immediately fail web requests with a database-lock error.
+- Added an authenticated browser smoke test covering login → dashboard rendering.
+
+
 ## [1.0.0] - 2026-09-23
 
 ### Stable release

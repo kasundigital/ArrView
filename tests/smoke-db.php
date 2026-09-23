@@ -7,6 +7,8 @@ $action = $argv[1] ?? '';
 
 switch ($action) {
     case 'seed':
+        $pdo->prepare("INSERT OR IGNORE INTO users(username,password_hash,role,enabled) VALUES(?,?, 'admin',1)")
+            ->execute(['ciadmin', password_hash('CiPass123!', PASSWORD_DEFAULT)]);
         $pdo->prepare("INSERT INTO app_settings(setting_key,setting_value) VALUES('sync_interval_hours','0')
             ON CONFLICT(setting_key) DO UPDATE SET setting_value=excluded.setting_value")->execute();
         $pdo->prepare("INSERT INTO instances(name,type,url,api_key,webhook_token,enabled,last_full_sync_at)

@@ -30,6 +30,36 @@ grep -q '"ok":true' /tmp/arrview-health.json
 echo "PASS: fresh Docker install health check"
 
 JOB_ID="$(docker exec "$APP" php /tests/smoke-db.php seed)"
+
+COOKIE_JAR="/tmp/arrview-ci-cookies.txt"
+LOGIN_HTML="/tmp/arrview-ci-login.html"
+curl -fsS -c "$COOKIE_JAR" http://127.0.0.1:18080/login.php >"$LOGIN_HTML"
+grep -q 'Welcome back' "$LOGIN_HTML"
+CSRF="$(grep -o 'name="csrf_token" value="[^"]*"' "$LOGIN_HTML" | head -n1 | cut -d'"' -f4 || true)"
+if [ -z "$CSRF" ]; then
+  echo "FAIL: login form did not expose a CSRF token"
+  cat "$LOGIN_HTML"
+  exit 1
+fi
+echo "PASS: login form and CSRF token render"
+LOGIN_STATUS="$(curl -sS -o /tmp/arrview-ci-login-post.html -w '%{http_code}' -b "$COOKIE_JAR" -c "$COOKIE_JAR" \
+  --data-urlencode "csrf_token=$CSRF" \
+  --data-urlencode "username=ciadmin" \
+  --data-urlencode "password=CiPass123!" \
+  http://127.0.0.1:18080/login.php)"
+[ "$LOGIN_STATUS" = "302" ]
+HOME_STATUS="$(curl -sS -o /tmp/arrview-ci-home.html -w '%{http_code}' -b "$COOKIE_JAR" http://127.0.0.1:18080/)"
+[ "$HOME_STATUS" = "200" ]
+HOME_BYTES="$(wc -c < /tmp/arrview-ci-home.html | tr -d ' ')"
+echo "INFO: authenticated dashboard response is $HOME_BYTES bytes"
+if ! grep -q 'ARRVIEW DASHBOARD' /tmp/arrview-ci-home.html; then
+  echo "FAIL: authenticated request did not render dashboard"
+  docker logs "$APP" || true
+  cat /tmp/arrview-ci-home.html
+  exit 1
+fi
+grep -q 'Media overview' /tmp/arrview-ci-home.html
+echo "PASS: browser login redirects to rendered dashboard"
 docker exec "$APP" php /app/bin/sync-job.php "$JOB_ID"
 MOVIES="$(docker exec "$APP" php /tests/smoke-db.php movie-count)"
 [ "$MOVIES" = "2" ]
