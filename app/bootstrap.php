@@ -88,6 +88,39 @@ function reveal_instance(array $instance): array
 }
 
 
+
+function diagnostic_cache_read(string $key, int $ttlMinutes): ?array
+{
+    global $pdo;
+    $stmt = $pdo->prepare(
+        "SELECT payload_json,checked_at,
+                CAST((julianday('now')-julianday(checked_at))*86400 AS INTEGER) age_seconds
+         FROM diagnostic_cache
+         WHERE cache_key=? AND datetime(checked_at) >= datetime('now', ?)
+         LIMIT 1"
+    );
+    $stmt->execute([$key, '-' . max(1,$ttlMinutes) . ' minutes']);
+    $row = $stmt->fetch();
+    if (!$row) return null;
+    $payload = json_decode((string)$row['payload_json'], true);
+    if (!is_array($payload)) return null;
+    return [
+        'payload'=>$payload,
+        'checked_at'=>(string)$row['checked_at'],
+        'age_seconds'=>max(0,(int)$row['age_seconds']),
+    ];
+}
+
+function diagnostic_cache_write(string $key, array $payload): void
+{
+    global $pdo;
+    $pdo->prepare(
+        "INSERT INTO diagnostic_cache(cache_key,payload_json,checked_at)
+         VALUES(?,?,CURRENT_TIMESTAMP)
+         ON CONFLICT(cache_key) DO UPDATE SET payload_json=excluded.payload_json,checked_at=CURRENT_TIMESTAMP"
+    )->execute([$key,json_encode($payload,JSON_UNESCAPED_SLASHES)]);
+}
+
 function audio_has_preferred_language(?string $audio, array $preferred): bool
 {
     if (!$audio || !$preferred) return true;
