@@ -66,6 +66,7 @@ $publicBaseUrl = $settings['public_base_url'] ?? '';
 $metadataSettings = $metadata->settings();
 $metadataStats = $metadata->stats();
 $hasPersonalTmdbKey = $metadataSettings['tmdb_api_key'] !== '';
+$sharedTmdbReady = trim((string)getenv('ARRVIEW_SHARED_TMDB_BEARER_TOKEN')) !== '';
 $forwardedProto = strtolower(trim(explode(',', (string)($_SERVER['HTTP_X_FORWARDED_PROTO'] ?? ''))[0] ?? ''));
 $scheme = in_array($forwardedProto, ['http','https'], true)
     ? $forwardedProto
@@ -121,6 +122,10 @@ $baseAppUrl = $scheme . '://' . $host;
     <div class="sync-track"><div class="sync-fill metadata-fill" style="width:0%"></div></div>
     <div class="metadata-current sync-current">Preparing metadata enrichment...</div>
   </div>
+
+  <?php if($metadataSettings['mode']==='free' && !$sharedTmdbReady):?>
+  <div class="notice info metadata-service-note">Free mode uses the central ArrView metadata service. If this installation is also the official metadata host, configure <code>ARRVIEW_SHARED_TMDB_BEARER_TOKEN</code> on that server so it can contact TMDB directly without self-calling.</div>
+  <?php endif;?>
 
   <div class="metadata-attribution">
     <strong>TMDB Attribution</strong>
