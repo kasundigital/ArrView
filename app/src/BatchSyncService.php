@@ -22,10 +22,11 @@ final class BatchSyncService
             $total = $this->countObjects($tmp);
             $progress?->__invoke(0, $total, 'Preparing movie sync');
             $seen = [];
+            $fileDetailIds = [];
             $count = 0;
             $sql = <<<'SQL'
-INSERT INTO movies (instance_id, remote_id, tmdb_id, imdb_id, minimum_availability, in_cinemas, digital_release, physical_release, availability_date, title, year, poster_url, has_file, monitored, quality, audio_languages, path, file_size, details_json, updated_at)
-VALUES (:instance_id, :remote_id, :tmdb_id, :imdb_id, :minimum_availability, :in_cinemas, :digital_release, :physical_release, :availability_date, :title, :year, :poster_url, :has_file, :monitored, :quality, :audio_languages, :path, :file_size, :details_json, CURRENT_TIMESTAMP)
+INSERT INTO movies (instance_id, remote_id, tmdb_id, imdb_id, minimum_availability, in_cinemas, digital_release, physical_release, availability_date, title, year, poster_url, has_file, monitored, quality, audio_languages, path, file_size, movie_file_json, details_json, updated_at)
+VALUES (:instance_id, :remote_id, :tmdb_id, :imdb_id, :minimum_availability, :in_cinemas, :digital_release, :physical_release, :availability_date, :title, :year, :poster_url, :has_file, :monitored, :quality, :audio_languages, :path, :file_size, :movie_file_json, :details_json, CURRENT_TIMESTAMP)
 ON CONFLICT(instance_id, remote_id) DO UPDATE SET
  tmdb_id=excluded.tmdb_id, imdb_id=excluded.imdb_id,
  minimum_availability=excluded.minimum_availability, in_cinemas=excluded.in_cinemas,
@@ -34,7 +35,7 @@ ON CONFLICT(instance_id, remote_id) DO UPDATE SET
  title=excluded.title, year=excluded.year, poster_url=excluded.poster_url,
  has_file=excluded.has_file, monitored=excluded.monitored, quality=excluded.quality,
  audio_languages=excluded.audio_languages, path=excluded.path, file_size=excluded.file_size,
- details_json=excluded.details_json, updated_at=CURRENT_TIMESTAMP
+ movie_file_json=excluded.movie_file_json, details_json=excluded.details_json, updated_at=CURRENT_TIMESTAMP
 SQL;
             $stmt = $this->pdo->prepare($sql);
             $this->pdo->beginTransaction();
@@ -43,7 +44,10 @@ SQL;
                     $remoteId = (int)($movie['id'] ?? 0);
                     if (!$remoteId) continue;
                     $seen[] = $remoteId;
-                    $movieFile = $movie['movieFile'] ?? null;
+                    $movieFile = is_array($movie['movieFile'] ?? null) ? $movie['movieFile'] : null;
+                    if (!empty($movie['hasFile']) && !$this->movieFileIsDetailed($movieFile)) {
+                        $fileDetailIds[] = $remoteId;
+                    }
                     $availability = $this->movieAvailability($movie);
                     $stmt->execute([
                         ':instance_id' => (int)$instance['id'], ':remote_id' => $remoteId,
@@ -59,6 +63,7 @@ SQL;
                         ':monitored' => !empty($movie['monitored']) ? 1 : 0, ':quality' => $this->quality($movieFile),
                         ':audio_languages' => $this->audioLanguages($movieFile), ':path' => $movie['path'] ?? null,
                         ':file_size' => $movieFile['size'] ?? null,
+                        ':movie_file_json' => $movieFile ? json_encode($movieFile, JSON_UNESCAPED_SLASHES) : null,
                         ':details_json' => json_encode($movie, JSON_UNESCAPED_SLASHES),
                     ]);
                     $count++;
@@ -72,6 +77,9 @@ SQL;
             } catch (Throwable $e) {
                 if ($this->pdo->inTransaction()) $this->pdo->rollBack();
                 throw $e;
+            }
+            if ($fileDetailIds) {
+                $this->refreshRadarrMovieFiles($instance, $fileDetailIds, $progress, $count, $total);
             }
             $this->removeStale('movies', (int)$instance['id'], $seen);
             $this->markFullSync((int)$instance['id'], "OK - {$count} movies (streamed)");
@@ -341,11 +349,15 @@ SQL;
     {
         $movie = $this->requestJson($instance, '/api/v3/movie/' . $movieId);
         $movieFile = is_array($movie['movieFile'] ?? null) ? $movie['movieFile'] : null;
+        if (!empty($movie['hasFile']) && !$this->movieFileIsDetailed($movieFile)) {
+            $files = $this->requestJson($instance, '/api/v3/moviefile?movieId=' . $movieId);
+            if (isset($files[0]) && is_array($files[0])) $movieFile = $files[0];
+        }
         $availability = $this->movieAvailability($movie);
 
         $sql = <<<'SQL'
-INSERT INTO movies (instance_id, remote_id, tmdb_id, imdb_id, minimum_availability, in_cinemas, digital_release, physical_release, availability_date, title, year, poster_url, has_file, monitored, quality, audio_languages, path, file_size, details_json, updated_at)
-VALUES (:instance_id, :remote_id, :tmdb_id, :imdb_id, :minimum_availability, :in_cinemas, :digital_release, :physical_release, :availability_date, :title, :year, :poster_url, :has_file, :monitored, :quality, :audio_languages, :path, :file_size, :details_json, CURRENT_TIMESTAMP)
+INSERT INTO movies (instance_id, remote_id, tmdb_id, imdb_id, minimum_availability, in_cinemas, digital_release, physical_release, availability_date, title, year, poster_url, has_file, monitored, quality, audio_languages, path, file_size, movie_file_json, details_json, updated_at)
+VALUES (:instance_id, :remote_id, :tmdb_id, :imdb_id, :minimum_availability, :in_cinemas, :digital_release, :physical_release, :availability_date, :title, :year, :poster_url, :has_file, :monitored, :quality, :audio_languages, :path, :file_size, :movie_file_json, :details_json, CURRENT_TIMESTAMP)
 ON CONFLICT(instance_id, remote_id) DO UPDATE SET
  tmdb_id=excluded.tmdb_id, imdb_id=excluded.imdb_id,
  minimum_availability=excluded.minimum_availability, in_cinemas=excluded.in_cinemas,
@@ -354,7 +366,7 @@ ON CONFLICT(instance_id, remote_id) DO UPDATE SET
  title=excluded.title, year=excluded.year, poster_url=excluded.poster_url,
  has_file=excluded.has_file, monitored=excluded.monitored, quality=excluded.quality,
  audio_languages=excluded.audio_languages, path=excluded.path, file_size=excluded.file_size,
- details_json=excluded.details_json, updated_at=CURRENT_TIMESTAMP
+ movie_file_json=excluded.movie_file_json, details_json=excluded.details_json, updated_at=CURRENT_TIMESTAMP
 SQL;
         $stmt = $this->pdo->prepare($sql);
         $stmt->execute([
@@ -376,6 +388,7 @@ SQL;
             ':audio_languages'=>$this->audioLanguages($movieFile),
             ':path'=>$movie['path'] ?? null,
             ':file_size'=>$movieFile['size'] ?? null,
+            ':movie_file_json'=>$movieFile ? json_encode($movieFile, JSON_UNESCAPED_SLASHES) : null,
             ':details_json'=>json_encode($movie, JSON_UNESCAPED_SLASHES),
         ]);
         $this->markSync((int)$instance['id'], 'Webhook update - movie refreshed');
@@ -582,6 +595,62 @@ SQL;
             return (new DateTimeImmutable($value))->setTimezone(new DateTimeZone('UTC'))->format('Y-m-d H:i:s');
         } catch (Throwable) {
             return null;
+        }
+    }
+
+
+    private function movieFileIsDetailed(?array $file): bool
+    {
+        if (!$file) return false;
+        return !empty($file['relativePath'])
+            || !empty($file['path'])
+            || !empty($file['mediaInfo'])
+            || !empty($file['sceneName'])
+            || !empty($file['releaseGroup']);
+    }
+
+    private function refreshRadarrMovieFiles(array $instance, array $movieIds, ?callable $progress = null, int $baseCurrent = 0, int $baseTotal = 0): void
+    {
+        $movieIds = array_values(array_unique(array_filter(array_map('intval', $movieIds))));
+        if (!$movieIds) return;
+
+        $update = $this->pdo->prepare(
+            'UPDATE movies
+             SET movie_file_json=?,
+                 quality=?,
+                 audio_languages=?,
+                 file_size=?,
+                 updated_at=CURRENT_TIMESTAMP
+             WHERE instance_id=? AND remote_id=?'
+        );
+
+        $done = 0;
+        $totalFiles = count($movieIds);
+        foreach (array_chunk($movieIds, 100) as $chunk) {
+            $query = implode('&', array_map(static fn(int $id): string => 'movieId=' . $id, $chunk));
+            $files = $this->requestJson($instance, '/api/v3/moviefile?' . $query);
+
+            foreach ($files as $file) {
+                if (!is_array($file)) continue;
+                $movieId = (int)($file['movieId'] ?? 0);
+                if ($movieId < 1) continue;
+
+                $update->execute([
+                    json_encode($file, JSON_UNESCAPED_SLASHES),
+                    $this->quality($file),
+                    $this->audioLanguages($file),
+                    $file['size'] ?? null,
+                    (int)$instance['id'],
+                    $movieId,
+                ]);
+                $done++;
+            }
+
+            $progress?->__invoke(
+                $baseCurrent,
+                max($baseTotal, $baseCurrent),
+                'Caching Radarr file details ' . min($done, $totalFiles) . ' / ' . $totalFiles
+            );
         }
     }
 
