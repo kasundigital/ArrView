@@ -1,9 +1,19 @@
-# ArrView v1.0.3 — Radarr File Details Fix
+# ArrView v1.0.4 — TMDB Enrichment Hotfix
 
-This release fixes available movies showing quality and size while filename, file path, media information, and VOD URL remained blank.
+This release fixes Admin → TMDB Metadata enrichment showing:
 
-ArrView now stores the complete Radarr movie-file record in SQLite. If the normal Radarr movie list does not include all file details, ArrView retrieves missing records in efficient batches from Radarr's movie-file API.
+```
+Unexpected token '<'
+```
 
-After upgrading, run a **Radarr full sync** once to populate detailed file information for existing movies.
+The error happened when a PHP/background-worker failure returned HTML instead of JSON.
+
+## Fixes
+
+- Metadata start/status endpoints now always return JSON.
+- The Admin UI safely handles unexpected server responses and shows the real error message.
+- Metadata workers now use heartbeats and stale-job recovery.
+- Large libraries are streamed through enrichment instead of loaded into one large PHP array.
+- Remote TMDB requests are gently paced to reduce rate-limit failures.
 
 No database reset is required.
