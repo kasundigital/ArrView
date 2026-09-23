@@ -53,7 +53,14 @@ CREATE TABLE instances(id INTEGER PRIMARY KEY AUTOINCREMENT,name TEXT,type TEXT,
 CREATE TABLE movies(id INTEGER PRIMARY KEY AUTOINCREMENT,instance_id INTEGER,remote_id INTEGER,title TEXT,year INTEGER,poster_url TEXT,has_file INTEGER DEFAULT 0,monitored INTEGER DEFAULT 0,quality TEXT,audio_languages TEXT,path TEXT,file_size INTEGER,updated_at TEXT DEFAULT CURRENT_TIMESTAMP,UNIQUE(instance_id,remote_id));
 CREATE TABLE series(id INTEGER PRIMARY KEY AUTOINCREMENT,instance_id INTEGER,remote_id INTEGER,title TEXT,year INTEGER,poster_url TEXT,monitored INTEGER DEFAULT 0,episode_count INTEGER DEFAULT 0,episode_file_count INTEGER DEFAULT 0,audio_languages TEXT,path TEXT,updated_at TEXT DEFAULT CURRENT_TIMESTAMP,UNIQUE(instance_id,remote_id));
 CREATE TABLE app_settings(setting_key TEXT PRIMARY KEY,setting_value TEXT);
-CREATE TABLE episodes(id INTEGER PRIMARY KEY AUTOINCREMENT,instance_id INTEGER,series_id INTEGER,series_remote_id INTEGER,remote_id INTEGER,season_number INTEGER DEFAULT 0,episode_number INTEGER DEFAULT 0,title TEXT,monitored INTEGER DEFAULT 0,has_file INTEGER DEFAULT 0,updated_at TEXT DEFAULT CURRENT_TIMESTAMP,UNIQUE(instance_id,remote_id));
+CREATE TABLE episodes(
+ id INTEGER PRIMARY KEY AUTOINCREMENT,instance_id INTEGER,series_id INTEGER,series_remote_id INTEGER,remote_id INTEGER,
+ season_number INTEGER DEFAULT 0,episode_number INTEGER DEFAULT 0,absolute_episode_number INTEGER,title TEXT,
+ air_date_utc TEXT,monitored INTEGER DEFAULT 0,has_file INTEGER DEFAULT 0,episode_file_id INTEGER,
+ relative_path TEXT,file_path TEXT,file_size INTEGER,quality TEXT,audio_languages TEXT,date_added TEXT,
+ release_group TEXT,scene_name TEXT,video_codec TEXT,video_resolution TEXT,audio_codec TEXT,audio_channels REAL,
+ updated_at TEXT DEFAULT CURRENT_TIMESTAMP,UNIQUE(instance_id,remote_id)
+);
 CREATE TABLE diagnostic_cache(cache_key TEXT PRIMARY KEY,payload_json TEXT NOT NULL,checked_at TEXT DEFAULT CURRENT_TIMESTAMP);
 CREATE TABLE sync_jobs(id INTEGER PRIMARY KEY AUTOINCREMENT,instance_id INTEGER,status TEXT DEFAULT 'queued',current_item INTEGER DEFAULT 0,total_items INTEGER DEFAULT 0,current_title TEXT,message TEXT,started_at TEXT,finished_at TEXT,created_at TEXT DEFAULT CURRENT_TIMESTAMP);
 INSERT INTO instances(name,type,url,api_key) VALUES('Legacy Radarr','radarr','http://radarr:7878','legacy-key');
@@ -124,8 +131,9 @@ $reopened=new Database($freshPath);
 ok((int)$reopened->pdo->query('SELECT COUNT(*) FROM movies')->fetchColumn()===$before,'data persists after database reopen');
 
 // Diagnostic cache TTL table round-trip.
-$reopened->pdo->prepare("INSERT INTO diagnostic_cache(cache_key,payload_json,checked_at) VALUES('test','{"ok":true}',CURRENT_TIMESTAMP)
-    ON CONFLICT(cache_key) DO UPDATE SET payload_json=excluded.payload_json,checked_at=CURRENT_TIMESTAMP")->execute();
+$reopened->pdo->prepare("INSERT INTO diagnostic_cache(cache_key,payload_json,checked_at) VALUES(?,?,CURRENT_TIMESTAMP)
+    ON CONFLICT(cache_key) DO UPDATE SET payload_json=excluded.payload_json,checked_at=CURRENT_TIMESTAMP")
+    ->execute(['test', json_encode(['ok'=>true])]);
 ok((string)$reopened->pdo->query("SELECT json_extract(payload_json,'$.ok') FROM diagnostic_cache WHERE cache_key='test'")->fetchColumn()==='1','diagnostic cache persists valid JSON');
 
 echo "
