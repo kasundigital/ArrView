@@ -10,10 +10,16 @@ $year = (int)($_GET['year'] ?? 0);
 $sortBy = strtolower((string)($_GET['sort_by'] ?? 'title'));
 $sortDir = strtolower((string)($_GET['sort_dir'] ?? 'asc'));
 if (!in_array($sortDir, ['asc','desc'], true)) $sortDir = 'asc';
+$page = max(1, (int)($_GET['page'] ?? 1));
+$pageSize = (int)app_setting('library_page_size', '100');
+if (!in_array($pageSize, [25,50,100,250,500], true)) $pageSize = 100;
+$audioFilter = trim((string)($_GET['audio'] ?? ''));
+$preferredLanguages = array_values(array_filter(array_map('trim', explode(',', (string)app_setting('preferred_audio_languages','')))));
+$preferredWarnings = app_setting('preferred_language_warning','1') === '1';
 
 $validFilters = $type === 'series'
-    ? ['all','airedmissing','missing','complete','future','noaudio','unmonitored','monitored']
-    : ['all','missing','upcoming','available','unknown','unmonitored','noaudio','monitored'];
+    ? ['all','airedmissing','missing','complete','future','noaudio','mixed','preferred','unmonitored','monitored']
+    : ['all','missing','upcoming','available','unknown','unmonitored','noaudio','preferred','monitored'];
 if (!in_array($filter, $validFilters, true)) $filter = 'all';
 
 $movieCount = (int)$pdo->query('SELECT COUNT(*) FROM movies')->fetchColumn();
@@ -27,6 +33,7 @@ $airedMissingSeriesCount = (int)$pdo->query('SELECT COUNT(*) FROM series WHERE a
 
 $instances = [];
 $years = [];
+$audioOptions = [];
 if ($type === 'movies' || $type === 'series') {
     $instanceType = $type === 'movies' ? 'radarr' : 'sonarr';
     $stmt = $pdo->prepare('SELECT id,name FROM instances WHERE enabled=1 AND type=? ORDER BY name COLLATE NOCASE');
@@ -48,10 +55,34 @@ if ($type === 'movies' || $type === 'series') {
     $yearStmt->execute($yearParams);
     $years = array_map('intval', array_column($yearStmt->fetchAll(), 'year'));
     if ($year > 0 && !in_array($year, $years, true)) $year = 0;
+
+    $audioRows = $pdo->query("SELECT DISTINCT audio_languages FROM {$yearTable} WHERE audio_languages IS NOT NULL AND TRIM(audio_languages)<>''")->fetchAll();
+    $audioSet = [];
+    foreach ($audioRows as $audioRow) {
+        foreach (array_map('trim', explode(',', (string)$audioRow['audio_languages'])) as $lang) {
+            if ($lang !== '') $audioSet[$lang] = true;
+        }
+    }
+    $audioOptions = array_keys($audioSet);
+    natcasesort($audioOptions);
+    $audioOptions = array_values($audioOptions);
 }
 
 $items = [];
 $filterCounts = [];
+$totalResults = 0;
+$totalPages = 1;
+
+$preferredSql = '';
+$preferredParams = [];
+if ($preferredLanguages) {
+    $parts = [];
+    foreach ($preferredLanguages as $language) {
+        $parts[] = "LOWER(COALESCE(%s.audio_languages,'')) LIKE ?";
+        $preferredParams[] = '%' . strtolower($language) . '%';
+    }
+    $preferredSql = implode(' OR ', $parts);
+}
 
 if ($type === 'movies') {
     $countSql = "SELECT
@@ -68,6 +99,7 @@ if ($type === 'movies') {
     if ($instanceId > 0) { $countSql .= ' AND m.instance_id=?'; $countParams[] = $instanceId; }
     if ($year > 0) { $countSql .= ' AND m.year=?'; $countParams[] = $year; }
     if ($q !== '') { $countSql .= ' AND m.title LIKE ?'; $countParams[] = '%' . $q . '%'; }
+    if ($audioFilter !== '') { $countSql .= " AND LOWER(COALESCE(m.audio_languages,'')) LIKE ?"; $countParams[] = '%' . strtolower($audioFilter) . '%'; }
     $stmt = $pdo->prepare($countSql); $stmt->execute($countParams); $filterCounts = $stmt->fetch() ?: [];
 
     $sql = 'SELECT m.*, i.name instance_name FROM movies m JOIN instances i ON i.id=m.instance_id WHERE i.enabled=1';
@@ -75,6 +107,7 @@ if ($type === 'movies') {
     if ($instanceId > 0) { $sql .= ' AND m.instance_id=?'; $params[] = $instanceId; }
     if ($year > 0) { $sql .= ' AND m.year=?'; $params[] = $year; }
     if ($q !== '') { $sql .= ' AND m.title LIKE ?'; $params[] = '%' . $q . '%'; }
+    if ($audioFilter !== '') { $sql .= " AND LOWER(COALESCE(m.audio_languages,'')) LIKE ?"; $params[] = '%' . strtolower($audioFilter) . '%'; }
 
     if ($filter === 'missing') $sql .= " AND m.has_file=0 AND m.monitored=1 AND m.availability_date IS NOT NULL AND datetime(m.availability_date) <= datetime('now')";
     elseif ($filter === 'upcoming') $sql .= " AND m.has_file=0 AND m.monitored=1 AND m.availability_date IS NOT NULL AND datetime(m.availability_date) > datetime('now')";
@@ -82,6 +115,11 @@ if ($type === 'movies') {
     elseif ($filter === 'unknown') $sql .= ' AND m.has_file=0 AND m.monitored=1 AND m.availability_date IS NULL';
     elseif ($filter === 'unmonitored') $sql .= ' AND m.has_file=0 AND m.monitored=0';
     elseif ($filter === 'noaudio') $sql .= " AND m.has_file=1 AND (m.audio_languages IS NULL OR TRIM(m.audio_languages)='')";
+    elseif ($filter === 'preferred' && $preferredLanguages) {
+        $parts=[]; foreach($preferredLanguages as $_){$parts[]="LOWER(COALESCE(m.audio_languages,'')) LIKE ?";}
+        $sql .= ' AND m.has_file=1 AND NOT (' . implode(' OR ', $parts) . ')';
+        foreach($preferredLanguages as $language)$params[]='%'.strtolower($language).'%';
+    }
     elseif ($filter === 'monitored') $sql .= ' AND m.monitored=1';
 
     $movieSortMap = [
@@ -93,7 +131,12 @@ if ($type === 'movies') {
         'instance' => 'i.name COLLATE NOCASE',
     ];
     if (!isset($movieSortMap[$sortBy])) $sortBy = 'title';
-    $sql .= ' ORDER BY ' . $movieSortMap[$sortBy] . ' ' . strtoupper($sortDir) . ', m.title COLLATE NOCASE ASC LIMIT 1000';
+    $countResult = $pdo->prepare('SELECT COUNT(*) FROM (' . $sql . ') q');
+    $countResult->execute($params); $totalResults = (int)$countResult->fetchColumn();
+    $totalPages = max(1, (int)ceil($totalResults / $pageSize));
+    if ($page > $totalPages) $page = $totalPages;
+    $offset = ($page - 1) * $pageSize;
+    $sql .= ' ORDER BY ' . $movieSortMap[$sortBy] . ' ' . strtoupper($sortDir) . ', m.title COLLATE NOCASE ASC LIMIT ' . $pageSize . ' OFFSET ' . $offset;
     $stmt = $pdo->prepare($sql); $stmt->execute($params); $items = $stmt->fetchAll();
 } elseif ($type === 'series') {
     $countSql = "SELECT
@@ -103,6 +146,7 @@ if ($type === 'movies') {
         SUM(CASE WHEN s.aired_missing_count>0 THEN 1 ELSE 0 END) airedmissing,
         SUM(CASE WHEN s.future_missing_count>0 THEN 1 ELSE 0 END) future,
         SUM(CASE WHEN s.missing_audio_count>0 THEN 1 ELSE 0 END) noaudio,
+        SUM(CASE WHEN s.language_inconsistent=1 THEN 1 ELSE 0 END) mixed,
         SUM(CASE WHEN s.monitored=0 THEN 1 ELSE 0 END) unmonitored,
         SUM(CASE WHEN s.monitored=1 THEN 1 ELSE 0 END) monitored
         FROM series s JOIN instances i ON i.id=s.instance_id WHERE i.enabled=1";
@@ -110,6 +154,7 @@ if ($type === 'movies') {
     if ($instanceId > 0) { $countSql .= ' AND s.instance_id=?'; $countParams[] = $instanceId; }
     if ($year > 0) { $countSql .= ' AND s.year=?'; $countParams[] = $year; }
     if ($q !== '') { $countSql .= ' AND s.title LIKE ?'; $countParams[] = '%' . $q . '%'; }
+    if ($audioFilter !== '') { $countSql .= " AND LOWER(COALESCE(s.audio_languages,'')) LIKE ?"; $countParams[] = '%' . strtolower($audioFilter) . '%'; }
     $stmt = $pdo->prepare($countSql); $stmt->execute($countParams); $filterCounts = $stmt->fetch() ?: [];
 
     $sql = 'SELECT s.*, i.name instance_name FROM series s JOIN instances i ON i.id=s.instance_id WHERE i.enabled=1';
@@ -117,12 +162,19 @@ if ($type === 'movies') {
     if ($instanceId > 0) { $sql .= ' AND s.instance_id=?'; $params[] = $instanceId; }
     if ($year > 0) { $sql .= ' AND s.year=?'; $params[] = $year; }
     if ($q !== '') { $sql .= ' AND s.title LIKE ?'; $params[] = '%' . $q . '%'; }
+    if ($audioFilter !== '') { $sql .= " AND LOWER(COALESCE(s.audio_languages,'')) LIKE ?"; $params[] = '%' . strtolower($audioFilter) . '%'; }
 
     if ($filter === 'airedmissing') $sql .= ' AND s.aired_missing_count>0';
     elseif ($filter === 'missing') $sql .= ' AND s.episode_file_count < s.episode_count';
     elseif ($filter === 'complete') $sql .= ' AND s.episode_count > 0 AND s.episode_file_count >= s.episode_count';
     elseif ($filter === 'future') $sql .= ' AND s.future_missing_count>0';
     elseif ($filter === 'noaudio') $sql .= ' AND s.missing_audio_count>0';
+    elseif ($filter === 'mixed') $sql .= ' AND s.language_inconsistent=1';
+    elseif ($filter === 'preferred' && $preferredLanguages) {
+        $parts=[]; foreach($preferredLanguages as $_){$parts[]="LOWER(COALESCE(s.audio_languages,'')) LIKE ?";}
+        $sql .= ' AND s.episode_file_count>0 AND NOT (' . implode(' OR ', $parts) . ')';
+        foreach($preferredLanguages as $language)$params[]='%'.strtolower($language).'%';
+    }
     elseif ($filter === 'unmonitored') $sql .= ' AND s.monitored=0';
     elseif ($filter === 'monitored') $sql .= ' AND s.monitored=1';
 
@@ -135,12 +187,18 @@ if ($type === 'movies') {
         'instance' => 'i.name COLLATE NOCASE',
     ];
     if (!isset($seriesSortMap[$sortBy])) $sortBy = 'title';
-    $sql .= ' ORDER BY ' . $seriesSortMap[$sortBy] . ' ' . strtoupper($sortDir) . ', s.title COLLATE NOCASE ASC LIMIT 1000';
+    $countResult = $pdo->prepare('SELECT COUNT(*) FROM (' . $sql . ') q');
+    $countResult->execute($params); $totalResults = (int)$countResult->fetchColumn();
+    $totalPages = max(1, (int)ceil($totalResults / $pageSize));
+    if ($page > $totalPages) $page = $totalPages;
+    $offset = ($page - 1) * $pageSize;
+    $sql .= ' ORDER BY ' . $seriesSortMap[$sortBy] . ' ' . strtoupper($sortDir) . ', s.title COLLATE NOCASE ASC LIMIT ' . $pageSize . ' OFFSET ' . $offset;
     $stmt = $pdo->prepare($sql); $stmt->execute($params); $items = $stmt->fetchAll();
 }
 
 function libraryUrl(string $type, string $filter, int $instanceId, string $q, int $year, string $sortBy, string $sortDir): string
 {
+    global $audioFilter;
     $params = [
         'type'=>$type,
         'filter'=>$filter,
@@ -150,6 +208,7 @@ function libraryUrl(string $type, string $filter, int $instanceId, string $q, in
     if ($instanceId > 0) $params['instance'] = $instanceId;
     if ($year > 0) $params['year'] = $year;
     if ($q !== '') $params['q'] = $q;
+    if ($audioFilter !== '') $params['audio'] = $audioFilter;
     return '/?' . http_build_query($params);
 }
 
@@ -162,6 +221,22 @@ function columnSortUrl(string $type, string $filter, int $instanceId, string $q,
 {
     $nextDir = ($sortBy === $column && $sortDir === 'asc') ? 'desc' : 'asc';
     return libraryUrl($type, $filter, $instanceId, $q, $year, $column, $nextDir);
+}
+
+
+function pageUrl(int $page): string
+{
+    $params = $_GET;
+    $params['page'] = max(1, $page);
+    return '/?' . http_build_query($params);
+}
+
+function hasPreferredLanguage(?string $audio, array $preferred): bool
+{
+    if (!$audio || !$preferred) return true;
+    $lower = strtolower($audio);
+    foreach ($preferred as $language) if (str_contains($lower, strtolower($language))) return true;
+    return false;
 }
 
 function sortIndicator(string $sortBy, string $sortDir, string $column): string
@@ -185,7 +260,7 @@ function sortIndicator(string $sortBy, string $sortDir, string $column): string
         <a href="/?type=movies" class="<?=$type==='movies'?'active':''?>">Movies</a>
         <a href="/?type=series" class="<?=$type==='series'?'active':''?>">Series</a>
         <a href="/support.php">Support</a>
-        <?php if($currentUser['role']==='admin'):?><a href="/admin.php">Admin</a><?php endif;?>
+        <?php if($currentUser['role']==='admin'):?><a href="/admin.php">Admin</a><a href="/system.php">System</a><?php endif;?>
         <span class="user-chip"><?=e($currentUser['username'])?></span>
         <a href="/logout.php">Logout</a>
     </nav>
@@ -239,7 +314,7 @@ function sortIndicator(string $sortBy, string $sortDir, string $column): string
             <p class="eyebrow"><?=$type==='movies'?'RADARR MOVIES':'SONARR SERIES'?></p>
             <h1><?=$type==='movies'?'Movies':'TV Series'?></h1>
         </div>
-        <div class="result-count"><?=number_format(count($items))?> shown</div>
+        <div class="result-count"><?php if($totalResults):?><?=number_format((($page-1)*$pageSize)+1)?>–<?=number_format(min($page*$pageSize,$totalResults))?> of <?=number_format($totalResults)?><?php else:?>0 results<?php endif;?></div>
     </section>
 
     <form class="library-toolbar" method="get">
@@ -261,6 +336,10 @@ function sortIndicator(string $sortBy, string $sortDir, string $column): string
                 <option value="<?=$availableYear?>" <?=$year===$availableYear?'selected':''?>><?=$availableYear?></option>
             <?php endforeach;?>
         </select>
+        <select name="audio" onchange="this.form.submit()" aria-label="Filter by audio language">
+            <option value="">All audio languages</option>
+            <?php foreach($audioOptions as $lang):?><option value="<?=e($lang)?>" <?=$audioFilter===$lang?'selected':''?>><?=e($lang)?></option><?php endforeach;?>
+        </select>
         <select name="sort_by" onchange="this.form.submit()" aria-label="Sort by">
             <option value="title" <?=$sortBy==='title'?'selected':''?>>Sort: Title</option>
             <option value="year" <?=$sortBy==='year'?'selected':''?>>Sort: Year</option>
@@ -274,7 +353,7 @@ function sortIndicator(string $sortBy, string $sortDir, string $column): string
             <option value="desc" <?=$sortDir==='desc'?'selected':''?>>Descending</option>
         </select>
         <button type="submit" class="toolbar-search-btn">Search</button>
-        <?php if($q!=='' || $instanceId>0 || $year>0 || $filter!=='all' || $sortBy!=='title' || $sortDir!=='asc'):?><a class="toolbar-reset" href="/?type=<?=e($type)?>">Reset</a><?php endif;?>
+        <?php if($q!=='' || $instanceId>0 || $year>0 || $audioFilter!=='' || $filter!=='all' || $sortBy!=='title' || $sortDir!=='asc'):?><a class="toolbar-reset" href="/?type=<?=e($type)?>">Reset</a><?php endif;?>
     </form>
 
     <nav class="quick-filters" aria-label="Library filters">
@@ -292,6 +371,8 @@ function sortIndicator(string $sortBy, string $sortDir, string $column): string
             <a class="<?=$filter==='unmonitored'?'active':''?>" href="<?=e(filterUrl($type,'unmonitored',$instanceId,$q,$year,$sortBy,$sortDir))?>">Unmonitored <span><?=number_format((int)($filterCounts['unmonitored']??0))?></span></a>
         <?php endif;?>
         <a class="<?=$filter==='noaudio'?'active warning-filter':''?>" href="<?=e(filterUrl($type,'noaudio',$instanceId,$q,$year,$sortBy,$sortDir))?>">Missing Audio Info <span><?=number_format((int)($filterCounts['noaudio']??0))?></span></a>
+        <?php if($type==='series'):?><a class="<?=$filter==='mixed'?'active warning-filter':''?>" href="<?=e(filterUrl($type,'mixed',$instanceId,$q,$year,$sortBy,$sortDir))?>">Mixed Languages <span><?=number_format((int)($filterCounts['mixed']??0))?></span></a><?php endif;?>
+        <?php if($preferredLanguages):?><a class="<?=$filter==='preferred'?'active warning-filter':''?>" href="<?=e(filterUrl($type,'preferred',$instanceId,$q,$year,$sortBy,$sortDir))?>">Preferred Language Warnings</a><?php endif;?>
         <a class="<?=$filter==='monitored'?'active':''?>" href="<?=e(filterUrl($type,'monitored',$instanceId,$q,$year,$sortBy,$sortDir))?>">Monitored <span><?=number_format((int)($filterCounts['monitored']??0))?></span></a>
     </nav>
 
@@ -336,6 +417,8 @@ function sortIndicator(string $sortBy, string $sortDir, string $column): string
                         <td class="title-cell">
                             <?php if($type==='movies'):?><a class="movie-title-link" href="/movie.php?id=<?=(int)$item['id']?>"><?=e($item['title'])?></a><?php else:?><a class="movie-title-link" href="/series.php?id=<?=(int)$item['id']?>"><?=e($item['title'])?></a><?php endif;?>
                             <?php if(!(int)$item['monitored']):?><span class="row-note">Not monitored</span><?php endif;?>
+                            <?php if($preferredWarnings && $preferredLanguages && !empty($item['has_file']) && !hasPreferredLanguage($item['audio_languages']??null,$preferredLanguages)):?><span class="row-note warning-note">Preferred audio missing</span><?php endif;?>
+                            <?php if($type==='series' && !empty($item['language_inconsistent'])):?><span class="row-note warning-note">Mixed episode languages</span><?php endif;?>
                         </td>
                         <td><?=e((string)($item['year'] ?: '—'))?></td>
                         <td><span class="table-status <?=$statusClass?>"><?=e($statusText)?></span></td>
@@ -360,7 +443,13 @@ function sortIndicator(string $sortBy, string $sortDir, string $column): string
                 </tbody>
             </table>
         </div>
-        <?php if(count($items)>=1000):?><p class="muted table-limit-note">Showing first 1,000 results. Use search or filters to narrow the list.</p><?php endif;?>
+        <?php if($totalPages>1):?>
+        <nav class="pagination" aria-label="Library pages">
+            <a class="<?=$page<=1?'disabled':''?>" href="<?=e(pageUrl(max(1,$page-1)))?>">← Previous</a>
+            <span>Page <?=number_format($page)?> of <?=number_format($totalPages)?></span>
+            <a class="<?=$page>=$totalPages?'disabled':''?>" href="<?=e(pageUrl(min($totalPages,$page+1)))?>">Next →</a>
+        </nav>
+        <?php endif;?>
     <?php endif;?>
 <?php endif;?>
 </main>
