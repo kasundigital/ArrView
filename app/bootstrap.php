@@ -243,6 +243,7 @@ function brand_logo(bool $version = true): string
 
 function apply_branding(string $html): string
 {
+    global $auth;
     if (!str_contains($html, '</head>')) return $html;
 
     // Always version static assets so browsers and reverse proxies cannot serve stale UI from an older release.
@@ -283,6 +284,13 @@ function apply_branding(string $html): string
             $html,
             1
         ) ?? $html;
+    }
+
+    if (str_contains($html, '<a href="/logout.php">Logout</a>')) {
+        $logoutForm = '<form class="nav-logout" method="post" action="/logout.php">'
+            . '<input type="hidden" name="csrf_token" value="' . e($auth->csrfToken()) . '">'
+            . '<button type="submit">Logout</button></form>';
+        $html = str_replace('<a href="/logout.php">Logout</a>', $logoutForm, $html);
     }
 
     $standardFooter = '<footer class="app-footer"><div><span>ArrView v' . e(ARRVIEW_VERSION) . '</span><span class="footer-dot">•</span><span>Designed &amp; Developed by <a href="https://www.kasunindika.com" target="_blank" rel="noopener noreferrer">Kasun Indika</a></span></div></footer>';
