@@ -37,13 +37,6 @@ foreach ($episodes as $episode) {
 }
 ksort($seasons);
 
-$settings = [];
-foreach ($pdo->query("SELECT setting_key,setting_value FROM app_settings WHERE setting_key IN ('public_local_root','public_base_url')")->fetchAll() as $row) {
-    $settings[$row['setting_key']] = $row['setting_value'];
-}
-$publicLocalRoot = rtrim((string)($settings['public_local_root'] ?? ''), "/\\");
-$publicBaseUrl = rtrim((string)($settings['public_base_url'] ?? ''), '/');
-
 function seriesBytes(?int $bytes): string {
     if (!$bytes) return '—';
     $units=['B','KB','MB','GB','TB']; $size=(float)$bytes; $i=0;
@@ -53,15 +46,6 @@ function seriesBytes(?int $bytes): string {
 function seriesDate(?string $date): string {
     if(!$date)return '—';
     try{return (new DateTime($date))->format('Y-m-d H:i');}catch(Throwable){return $date;}
-}
-function episodeVod(?string $filePath,string $localRoot,string $baseUrl): ?string {
-    if(!$filePath || $localRoot==='' || $baseUrl==='')return null;
-    $path=str_replace('\\','/',$filePath);
-    $root=rtrim(str_replace('\\','/',$localRoot),'/');
-    if(!str_starts_with($path,$root))return null;
-    $relative=ltrim(substr($path,strlen($root)),'/');
-    if($relative==='')return null;
-    return $baseUrl.'/'.implode('/',array_map('rawurlencode',explode('/',$relative)));
 }
 function hasAired(array $episode): bool {
     if(empty($episode['air_date_utc']))return false;
@@ -79,6 +63,12 @@ foreach($episodes as $ep){
     }
 }
 $languageNames=array_keys($languages);natcasesort($languageNames);
+$preferredLanguages=array_values(array_filter(array_map('trim',explode(',',(string)app_setting('preferred_audio_languages','')))));
+$preferredWarning=app_setting('preferred_language_warning','1')==='1'
+    && $preferredLanguages
+    && $available>0
+    && !audio_has_preferred_language(implode(', ',$languageNames),$preferredLanguages);
+$languageInconsistent=!empty($series['language_inconsistent']);
 ?>
 <!doctype html>
 <html lang="en">
@@ -90,7 +80,7 @@ $languageNames=array_keys($languages);natcasesort($languageNames);
 <body>
 <header class="topbar">
 <a class="brand" href="/">ArrView <small class="version-chip">v<?=e(ARRVIEW_VERSION)?></small></a>
-<nav><a href="/?type=movies">Movies</a><a class="active" href="/?type=series">Series</a><a href="/support.php">Support</a><?php if($currentUser['role']==='admin'):?><a href="/admin.php">Admin</a><?php endif;?><span class="user-chip"><?=e($currentUser['username'])?></span><a href="/logout.php">Logout</a></nav>
+<nav><a href="/?type=movies">Movies</a><a class="active" href="/?type=series">Series</a><a href="/support.php">Support</a><?php if($currentUser['role']==='admin'):?><a href="/admin.php">Admin</a><a href="/system.php">System</a><?php endif;?><span class="user-chip"><?=e($currentUser['username'])?></span><a href="/logout.php">Logout</a></nav>
 </header>
 
 <main class="wrap series-detail-wrap">
@@ -107,6 +97,8 @@ $languageNames=array_keys($languages);natcasesort($languageNames);
     </div>
     <?php if(!empty($tmdb['overview'])):?><p class="movie-overview"><?=e($tmdb['overview'])?></p><?php endif;?>
     <p class="meta"><?=number_format($available)?> / <?=number_format($total)?> episodes have files · Audio: <?=e($languageNames?implode(', ',$languageNames):'Unknown')?></p>
+    <?php if($languageInconsistent):?><div class="notice warning compact-notice"><strong>Mixed-language inconsistency detected.</strong> Episode files do not all have the same audio-language profile.</div><?php endif;?>
+    <?php if($preferredWarning):?><div class="notice warning compact-notice"><strong>Preferred audio language not found.</strong> Preferred: <?=e(implode(', ',$preferredLanguages))?>.</div><?php endif;?>
     <div class="detail-actions">
       <a class="table-action" href="<?=e(rtrim($series['instance_url'],'/'))?>" target="_blank" rel="noopener noreferrer">Open Sonarr ↗</a>
       <?php if($tmdbId>0):?><a class="table-action tmdb-link" href="https://www.themoviedb.org/tv/<?=$tmdbId?>" target="_blank" rel="noopener noreferrer">TMDB #<?=$tmdbId?> ↗</a><?php endif;?>
@@ -162,11 +154,11 @@ $languageNames=array_keys($languages);natcasesort($languageNames);
 <thead><tr><th>Episode</th><th>Title</th><th>Air Date</th><th>Status</th><th>Audio</th><th>Quality</th><th>Size</th><th>File Added</th><th>Actions</th></tr></thead>
 <tbody>
 <?php foreach($seasonEpisodes as $ep):
-  $missing=!(int)$ep['has_file'];$aired=hasAired($ep);$vod=episodeVod($ep['file_path'],$publicLocalRoot,$publicBaseUrl);
+  $missing=!(int)$ep['has_file'];$aired=hasAired($ep);$vod=viewer_can_see_vod($currentUser)?vod_url_for((int)$series['instance_id'],$ep['file_path']):null;
 ?>
 <tr class="<?=$missing&&$aired?'row-missing':''?>">
 <td class="episode-code">S<?=str_pad((string)$ep['season_number'],2,'0',STR_PAD_LEFT)?>E<?=str_pad((string)$ep['episode_number'],2,'0',STR_PAD_LEFT)?></td>
-<td><strong><?=e($ep['title'])?></strong><?php if(!(int)$ep['monitored']):?><span class="row-note">Not monitored</span><?php endif;?></td>
+<td><strong><?=e($ep['title'])?></strong><?php if(!(int)$ep['monitored']):?><span class="row-note">Not monitored</span><?php endif;?><?php if($preferredLanguages && (int)$ep['has_file'] && !audio_has_preferred_language($ep['audio_languages']??null,$preferredLanguages)):?><span class="row-note warning-note">Preferred audio missing</span><?php endif;?></td>
 <td><?=e(seriesDate($ep['air_date_utc']))?></td>
 <td><span class="table-status <?=$missing?'status-missing':'status-ok'?>"><?=$missing?($aired?'Missing':'Unaired / Missing'):'Available'?></span></td>
 <td class="audio-cell"><?=e($ep['audio_languages'] ?: ($missing?'No file':'Unknown'))?></td>
