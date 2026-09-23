@@ -7,7 +7,7 @@ final class MetadataService
     private const DEFAULT_FREE_ENDPOINT = 'https://arrview.dashboards420.com/metadata-api.php';
     private const CACHE_TTL_DAYS = 30;
 
-    public function __construct(private PDO $pdo)
+    public function __construct(private PDO $pdo, private ?SecretService $secret = null)
     {
     }
 
@@ -22,7 +22,9 @@ final class MetadataService
 
         return [
             'mode' => $mode,
-            'tmdb_api_key' => (string)($settings['tmdb_api_key'] ?? ''),
+            'tmdb_api_key' => $this->secret
+                ? $this->secret->reveal((string)($settings['tmdb_api_key'] ?? ''))
+                : (string)($settings['tmdb_api_key'] ?? ''),
             'installation_id' => (string)($settings['installation_id'] ?? ''),
             'free_endpoint' => rtrim((string)(getenv('ARRVIEW_METADATA_API_URL') ?: self::DEFAULT_FREE_ENDPOINT), '?&'),
         ];
@@ -36,7 +38,8 @@ final class MetadataService
         $stmt = $this->pdo->prepare('INSERT INTO app_settings(setting_key,setting_value) VALUES(?,?) ON CONFLICT(setting_key) DO UPDATE SET setting_value=excluded.setting_value');
         $stmt->execute(['metadata_mode', $mode]);
         if ($apiKey !== null && trim($apiKey) !== '') {
-            $stmt->execute(['tmdb_api_key', trim($apiKey)]);
+            $value = $this->secret ? $this->secret->protect(trim($apiKey)) : trim($apiKey);
+            $stmt->execute(['tmdb_api_key', $value]);
         }
     }
 
