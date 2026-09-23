@@ -1,44 +1,46 @@
-# ArrView Development Status
+# ArrView Roadmap
 
-## Implemented in v0.8 branch
+ArrView 1.0 is the stable baseline. This file now tracks work beyond the v1.0.0 release rather than listing already-completed features.
 
-- [x] Cached Sonarr episodes during normal sync
-- [x] Series → Season → Episode expandable view
-- [x] Episode file status, audio, quality, path, size and file-added date
-- [x] Episode Public/VOD links
-- [x] Aired Missing / Future / Unmonitored Sonarr filters
-- [x] Sonarr episode Why Missing diagnostics
-- [x] Lightweight diagnostics by default
-- [x] Explicit streamed Deep Search for Radarr and Sonarr
-- [x] Cap rendered deep-search results
-- [x] CSRF protection for admin/user/sync/login/setup mutations
-- [x] HTTPS-aware secure session cookies
-- [x] Session idle timeout and basic login throttling
-- [x] Final-admin protection
-- [x] Friendly duplicate username handling
-- [x] Edit Radarr/Sonarr instances
-- [x] Health endpoint
-- [x] Real MIT LICENSE
-- [x] .gitignore / .dockerignore / .env.example
-- [x] Image-based docker-compose.yml
-- [x] PHP syntax lint in Docker build and PR CI
-- [x] Reduce Docker publishing to relevant main-branch changes
+## v1.0.0 Stable baseline
 
-## Still planned
+The following release goals are complete:
 
-- [ ] Pagination and sortable library columns
-- [ ] Specific-language filtering and preferred-language policy
-- [ ] Better mixed-language inconsistency detection
-- [ ] More detailed Sonarr path/import/download-client categorization
-- [ ] Diagnostic cache TTL display and manual refresh controls
-- [ ] Scheduled automatic sync UI
-- [ ] Radarr/Sonarr webhook incremental updates
-- [ ] Sync history and cancel/stop controls
-- [ ] Multiple/per-instance VOD path mappings
-- [ ] Viewer permission toggle for VOD links
-- [ ] Logout via POST
-- [ ] Stronger server-side login rate limiting
-- [ ] API-key encryption-at-rest option
-- [ ] Better mobile episode table experience
-- [ ] Screenshot assets for README
-- [ ] Formal changelog / tagged releases
+- [x] Large-library pagination
+- [x] Sortable library columns
+- [x] True scheduled automatic sync
+- [x] Sync history
+- [x] Stop/cancel running sync
+- [x] Backup and restore
+- [x] Persistent server-side login rate limiting
+- [x] Optional API-key encryption at rest
+- [x] Improved Sonarr path/import/download-client diagnostics
+- [x] Multiple/per-instance VOD mappings
+- [x] Viewer VOD permission control
+- [x] Responsive mobile episode cards
+- [x] Specific audio-language filtering
+- [x] Preferred-language rules and warnings
+- [x] Mixed-language inconsistency detection
+- [x] Diagnostic cache TTL visibility
+- [x] Manual diagnostic refresh
+- [x] Hybrid TMDB metadata and local cache
+- [x] Release-aware movie availability
+- [x] Radarr/Sonarr webhook incremental updates and setup guide
+- [x] Fresh-install, upgrade, stress, webhook, restart, recovery, and security regression CI
+
+## Post-1.0 candidates
+
+These are future ideas, not v1 blockers:
+
+- [ ] Optional notification integrations for important ArrView findings
+- [ ] Per-season language policy overrides
+- [ ] Bazarr/subtitle diagnostics integration
+- [ ] More advanced download-client/path-mapping remediation guidance
+- [ ] Exportable health/diagnostic reports
+- [ ] Optional external database backend for extremely large multi-user deployments
+- [ ] Additional metadata providers
+- [ ] More granular viewer permissions
+- [ ] API endpoints for external dashboard integrations
+- [ ] Accessibility and localization expansion
+
+Feature requests and bug reports are welcome through GitHub Issues.
