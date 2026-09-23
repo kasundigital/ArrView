@@ -1,0 +1,41 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1440" height="900" viewBox="0 0 1440 900">
+<rect width="1440" height="900" fill="#0b111c"/>
+<rect width="1440" height="64" fill="#080d15"/>
+<text x="56" y="40" font-family="Arial,sans-serif" font-size="24" font-weight="700" fill="#f4f7fb">ArrView</text>
+<text x="166" y="40" font-family="Arial,sans-serif" font-size="10" fill="#8fa1ba">v1.0.0</text>
+<text x="960" y="39" font-family="Arial,sans-serif" font-size="13" fill="#aab6c8">Library   Instances   Users   System   Support</text>
+<text x="70" y="116" font-family="Arial,sans-serif" font-size="11" font-weight="700" fill="#7c9cff">ADMINISTRATION</text>
+<text x="70" y="158" font-family="Arial,sans-serif" font-size="36" font-weight="700" fill="#f4f7fb">System</text>
+<text x="70" y="184" font-family="Arial,sans-serif" font-size="12" fill="#8294ad">Sync, backup, VOD, language and security controls.</text>
+<g font-family="Arial,sans-serif">
+<rect x="70" y="215" width="630" height="260" rx="15" fill="#101a28" stroke="#2b3c57"/>
+<text x="92" y="246" font-size="10" font-weight="700" fill="#7c9cff">AUTOMATION</text>
+<text x="92" y="276" font-size="21" font-weight="700" fill="#f4f7fb">Library &amp; diagnostics</text>
+<text x="92" y="315" font-size="10" fill="#8fa1ba">AUTOMATIC FULL SYNC</text>
+<rect x="92" y="326" width="270" height="36" rx="8" fill="#0a1018" stroke="#31445e"/><text x="109" y="350" font-size="12" fill="#dce5f3">Every 12 hours</text>
+<text x="382" y="315" font-size="10" fill="#8fa1ba">LIBRARY PAGE SIZE</text>
+<rect x="382" y="326" width="270" height="36" rx="8" fill="#0a1018" stroke="#31445e"/><text x="399" y="350" font-size="12" fill="#dce5f3">100 rows</text>
+<text x="92" y="396" font-size="10" fill="#8fa1ba">PREFERRED AUDIO LANGUAGES</text>
+<rect x="92" y="407" width="560" height="36" rx="8" fill="#0a1018" stroke="#31445e"/><text x="109" y="431" font-size="12" fill="#dce5f3">English, Sinhala, Tamil</text>
+
+<rect x="720" y="215" width="650" height="260" rx="15" fill="#101a28" stroke="#2b3c57"/>
+<text x="742" y="246" font-size="10" font-weight="700" fill="#7c9cff">SECURITY</text>
+<text x="742" y="276" font-size="21" font-weight="700" fill="#f4f7fb">API-key encryption at rest</text>
+<g font-size="10" fill="#8fa1ba"><text x="742" y="318">LIBSODIUM</text><text x="930" y="318">ENCRYPTION KEY</text><text x="1135" y="318">CREDENTIAL STORAGE</text></g>
+<g font-size="16" font-weight="700"><text x="742" y="345" fill="#73e3ad">Available</text><text x="930" y="345" fill="#73e3ad">Configured</text><text x="1135" y="345" fill="#73e3ad">Encrypted</text></g>
+<rect x="742" y="390" width="170" height="38" rx="9" fill="#6f8fff"/><text x="775" y="415" font-size="12" font-weight="700" fill="#07101d">Encryption Enabled</text>
+
+<rect x="70" y="500" width="1300" height="320" rx="15" fill="#101a28" stroke="#2b3c57"/>
+<text x="92" y="532" font-size="10" font-weight="700" fill="#7c9cff">SYNC HISTORY</text>
+<text x="92" y="562" font-size="21" font-weight="700" fill="#f4f7fb">Recent jobs</text>
+</g>
+<g font-family="Arial,sans-serif" font-size="11">
+<rect x="92" y="590" width="1256" height="58" rx="10" fill="#0b1420" stroke="#243650"/>
+<text x="112" y="615" fill="#f4f7fb" font-weight="700">Radarr Main</text><text x="112" y="634" fill="#8294ad">#418 · scheduled · 2026-09-23 11:15</text>
+<rect x="650" y="606" width="82" height="24" rx="12" fill="#10251c"/><text x="664" y="622" fill="#73e3ad">Completed</text><text x="820" y="622" fill="#dce5f3">37,042 / 37,042</text>
+<rect x="92" y="660" width="1256" height="58" rx="10" fill="#0b1420" stroke="#243650"/>
+<text x="112" y="685" fill="#f4f7fb" font-weight="700">Sonarr Main</text><text x="112" y="704" fill="#8294ad">#419 · manual · 2026-09-23 11:21</text>
+<rect x="650" y="676" width="70" height="24" rx="12" fill="#14213b"/><text x="664" y="692" fill="#aabaff">Running</text><text x="820" y="692" fill="#dce5f3">4,820 / 12,900</text>
+<rect x="1210" y="672" width="110" height="32" rx="8" fill="#25131a" stroke="#6d3341"/><text x="1245" y="693" fill="#ff8da1">Cancel</text>
+</g>
+</svg>
