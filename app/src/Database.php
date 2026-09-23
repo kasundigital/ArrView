@@ -227,6 +227,8 @@ CREATE TABLE IF NOT EXISTS sync_jobs (
     total_items INTEGER NOT NULL DEFAULT 0,
     current_title TEXT NULL,
     message TEXT NULL,
+    source TEXT NOT NULL DEFAULT 'manual',
+    cancel_requested INTEGER NOT NULL DEFAULT 0,
     started_at TEXT NULL,
     finished_at TEXT NULL,
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
