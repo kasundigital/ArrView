@@ -287,7 +287,25 @@ function apply_branding(string $html): string
     return $html;
 }
 
-ob_start('apply_branding');
+// Buffer normally, then apply shared branding once at shutdown.
+// Running apply_branding as an output-handler callback could produce a zero-byte
+// authenticated response on larger pages. Keep the decorator out of PHP's
+// output-handler context and always fall back to the original HTML.
+ob_start();
+register_shutdown_function(static function (): void {
+    if (ob_get_level() < 1) return;
+
+    $html = ob_get_clean();
+    if ($html === false || $html === '') return;
+
+    try {
+        $branded = apply_branding($html);
+        echo $branded !== '' ? $branded : $html;
+    } catch (Throwable $e) {
+        error_log('ArrView branding fallback: ' . $e->getMessage());
+        echo $html;
+    }
+});
 
 function e(?string $value): string
 {
