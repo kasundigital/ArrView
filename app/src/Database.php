@@ -305,6 +305,40 @@ SQL);
             }
         }
 
+        // Backfill availability from the Radarr JSON already cached by older ArrView versions.
+        // This makes upgrades immediately availability-aware without waiting for the next full sync.
+        try {
+            $this->pdo->exec(<<<'SQL'
+UPDATE movies
+SET
+    minimum_availability = COALESCE(minimum_availability, json_extract(details_json, '$.minimumAvailability')),
+    in_cinemas = COALESCE(in_cinemas, json_extract(details_json, '$.inCinemas')),
+    digital_release = COALESCE(digital_release, json_extract(details_json, '$.digitalRelease')),
+    physical_release = COALESCE(physical_release, json_extract(details_json, '$.physicalRelease')),
+    availability_date = COALESCE(
+        availability_date,
+        CASE lower(COALESCE(json_extract(details_json, '$.minimumAvailability'), ''))
+            WHEN 'incinemas' THEN json_extract(details_json, '$.inCinemas')
+            WHEN 'released' THEN
+                CASE
+                    WHEN json_extract(details_json, '$.digitalRelease') IS NOT NULL
+                         AND json_extract(details_json, '$.physicalRelease') IS NOT NULL
+                    THEN min(json_extract(details_json, '$.digitalRelease'), json_extract(details_json, '$.physicalRelease'))
+                    ELSE COALESCE(
+                        json_extract(details_json, '$.digitalRelease'),
+                        json_extract(details_json, '$.physicalRelease'),
+                        json_extract(details_json, '$.inCinemas')
+                    )
+                END
+            ELSE NULL
+        END
+    )
+WHERE details_json IS NOT NULL;
+SQL);
+        } catch (Throwable) {
+            // Older SQLite builds without JSON functions can wait for the next Radarr sync.
+        }
+
         $this->pdo->exec('CREATE INDEX IF NOT EXISTS idx_movies_tmdb ON movies(tmdb_id)');
         $this->pdo->exec('CREATE INDEX IF NOT EXISTS idx_movies_availability ON movies(has_file, availability_date, monitored)');
         $this->pdo->exec('CREATE INDEX IF NOT EXISTS idx_series_tmdb ON series(tmdb_id)');
