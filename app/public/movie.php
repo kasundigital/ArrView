@@ -98,7 +98,7 @@ $preferredLanguages = array_values(array_filter(array_map('trim', explode(',', (
 $preferredWarning = app_setting('preferred_language_warning','1') === '1'
     && $preferredLanguages
     && !empty($movie['has_file'])
-    && !hasPreferredLanguage($file['languages'] ?? $cached['audio_languages'] ?? null, $preferredLanguages);
+    && !audio_has_preferred_language($file['languages'] ?? $cached['audio_languages'] ?? null, $preferredLanguages);
 $folderYearMismatch = false;
 if (!empty($movie['path']) && !empty($movie['year']) && preg_match('/\((\d{4})\)\s*$/', (string)$movie['path'], $folderYearMatch)) {
     $folderYearMismatch = (int)$folderYearMatch[1] !== (int)$movie['year'];
