@@ -51,7 +51,13 @@ function dateLabel(?string $date): string {
 
 $tmdbId = (int)($cached['tmdb_id'] ?? $rawMovie['tmdbId'] ?? 0);
 $tmdb = $tmdbId > 0 ? $metadata->cached('movie', $tmdbId) : null;
-$rawFile = is_array($rawMovie['movieFile'] ?? null) ? $rawMovie['movieFile'] : null;
+$cachedFile = null;
+if (!empty($cached['movie_file_json'])) {
+    $decodedFile = json_decode((string)$cached['movie_file_json'], true);
+    if (is_array($decodedFile)) $cachedFile = $decodedFile;
+}
+$embeddedFile = is_array($rawMovie['movieFile'] ?? null) ? $rawMovie['movieFile'] : null;
+$rawFile = $cachedFile ?: $embeddedFile;
 $mediaInfo = is_array($rawFile['mediaInfo'] ?? null) ? $rawFile['mediaInfo'] : [];
 $movie = [
     'title'=>$rawMovie['title'] ?? $cached['title'],
@@ -68,19 +74,34 @@ $movie = [
     'studio'=>$rawMovie['studio'] ?? (!empty($tmdb['companies']) ? implode(', ', array_values(array_filter(array_map(fn($x)=>is_array($x)?($x['name']??null):null, $tmdb['companies'])))) : null),
 ];
 $file = $rawFile ? [
+    'id'=>$rawFile['id'] ?? null,
     'path'=>$rawFile['path'] ?? (($movie['path'] ?? '') && !empty($rawFile['relativePath']) ? rtrim((string)$movie['path'],'/\\') . '/' . ltrim((string)$rawFile['relativePath'],'/\\') : null),
     'relative_path'=>$rawFile['relativePath'] ?? null,
     'size'=>$rawFile['size'] ?? $cached['file_size'],
     'quality'=>$rawFile['quality']['quality']['name'] ?? $cached['quality'],
-    'languages'=>$cached['audio_languages'],
+    'languages'=>$cached['audio_languages'] ?: null,
     'date_added'=>$rawFile['dateAdded'] ?? null,
     'release_group'=>$rawFile['releaseGroup'] ?? null,
     'scene_name'=>$rawFile['sceneName'] ?? null,
+    'edition'=>$rawFile['edition'] ?? null,
+    'original_file_path'=>$rawFile['originalFilePath'] ?? null,
+    'custom_format_score'=>$rawFile['customFormatScore'] ?? null,
     'video_codec'=>$mediaInfo['videoCodec'] ?? null,
     'video_resolution'=>$mediaInfo['resolution'] ?? $mediaInfo['videoResolution'] ?? null,
+    'video_fps'=>$mediaInfo['videoFps'] ?? null,
+    'video_bitrate'=>$mediaInfo['videoBitrate'] ?? null,
+    'video_bit_depth'=>$mediaInfo['videoBitDepth'] ?? null,
+    'dynamic_range'=>$mediaInfo['videoDynamicRangeType'] ?? $mediaInfo['videoDynamicRange'] ?? null,
     'audio_codec'=>$mediaInfo['audioCodec'] ?? null,
     'audio_channels'=>$mediaInfo['audioChannels'] ?? null,
+    'audio_bitrate'=>$mediaInfo['audioBitrate'] ?? null,
+    'audio_streams'=>$mediaInfo['audioStreamCount'] ?? null,
+    'subtitles'=>$mediaInfo['subtitles'] ?? null,
+    'runtime'=>$mediaInfo['runTime'] ?? null,
 ] : null;
+$fileName = $file && !empty($file['path'])
+    ? basename(str_replace('\\','/', (string)$file['path']))
+    : ($file && !empty($file['relative_path']) ? basename(str_replace('\\','/', (string)$file['relative_path'])) : null);
 $timeline = [
     'added_to_radarr'=>$rawMovie['added'] ?? null,
     'grabbed_at'=>null,
@@ -168,12 +189,17 @@ if (!empty($movie['path']) && !empty($movie['year']) && preg_match('/\((\d{4})\)
         <div class="detail-card"><span>Audio Language</span><strong><?=e($file['languages'] ?? $cached['audio_languages'] ?? 'Unknown')?></strong></div>
         <div class="detail-card"><span>Quality</span><strong><?=e($file['quality'] ?? $cached['quality'] ?? '—')?></strong></div>
         <div class="detail-card"><span>File Size</span><strong><?=e(movieBytes(isset($file['size'])?(int)$file['size']:(isset($cached['file_size'])?(int)$cached['file_size']:null)))?></strong></div>
+        <div class="detail-card"><span>File Name</span><strong class="path-line"><?=e($fileName ?? '—')?></strong></div>
         <div class="detail-card"><span>Runtime</span><strong><?=!empty($movie['runtime'])?e((string)$movie['runtime']).' min':'—'?></strong></div>
         <div class="detail-card"><span>Studio</span><strong><?=e($movie['studio'] ?? '—')?></strong></div>
         <div class="detail-card"><span>Instance</span><strong><?=e($instance['name'])?></strong></div>
         <div class="detail-card"><span>Minimum Availability</span><strong><?=e($cached['minimum_availability'] ?: 'Unknown')?></strong></div>
         <div class="detail-card"><span>Expected Availability</span><strong><?=e($availabilityLabel)?></strong></div>
     </section>
+
+    <?php if(!empty($movie['has_file']) && !$file):?>
+    <div class="notice warning availability-notice"><strong>Movie file details are not cached yet.</strong> Run a Radarr full sync. ArrView will fetch the Radarr movie-file record and cache the filename, path, codecs and VOD mapping data.</div>
+    <?php endif;?>
 
     <?php if($publicMediaUrl):?>
     <section class="panel public-media-panel">
@@ -224,13 +250,23 @@ if (!empty($movie['path']) && !empty($movie['year']) && preg_match('/\((\d{4})\)
     <section class="panel">
         <h2>File information</h2>
         <dl class="detail-list">
+            <div><dt>File name</dt><dd class="path-line"><?=e($fileName ?? '—')?></dd></div>
             <div><dt>Movie folder</dt><dd class="path-line"><?=e($movie['path'] ?? $cached['path'] ?? '—')?></dd></div>
             <div><dt>File location</dt><dd class="path-line"><?=e($file['path'] ?? '—')?></dd></div>
             <div><dt>Relative path</dt><dd class="path-line"><?=e($file['relative_path'] ?? '—')?></dd></div>
-            <div><dt>Video</dt><dd><?=e(trim(($file['video_codec'] ?? '') . ' ' . ($file['video_resolution'] ?? '')) ?: '—')?></dd></div>
-            <div><dt>Audio codec</dt><dd><?=e($file['audio_codec'] ?? '—')?><?php if(!empty($file['audio_channels'])):?> · <?=e((string)$file['audio_channels'])?> channels<?php endif;?></dd></div>
+            <div><dt>Radarr file ID</dt><dd><?=e(isset($file['id']) ? (string)$file['id'] : '—')?></dd></div>
+            <div><dt>File added</dt><dd><?=e(dateLabel($file['date_added'] ?? null))?></dd></div>
+            <div><dt>Video</dt><dd><?=e(trim(($file['video_codec'] ?? '') . ' ' . ($file['video_resolution'] ?? '')) ?: '—')?><?php if(!empty($file['video_fps'])):?> · <?=e((string)$file['video_fps'])?> fps<?php endif;?><?php if(!empty($file['video_bit_depth'])):?> · <?=e((string)$file['video_bit_depth'])?>-bit<?php endif;?><?php if(!empty($file['dynamic_range'])):?> · <?=e((string)$file['dynamic_range'])?><?php endif;?></dd></div>
+            <div><dt>Video bitrate</dt><dd><?=!empty($file['video_bitrate'])?e(number_format((int)$file['video_bitrate']).' bps'):'—'?></dd></div>
+            <div><dt>Audio</dt><dd><?=e($file['audio_codec'] ?? '—')?><?php if(!empty($file['audio_channels'])):?> · <?=e((string)$file['audio_channels'])?> channels<?php endif;?><?php if(!empty($file['audio_streams'])):?> · <?=e((string)$file['audio_streams'])?> stream<?=((int)$file['audio_streams']===1?'':'s')?><?php endif;?></dd></div>
+            <div><dt>Audio bitrate</dt><dd><?=!empty($file['audio_bitrate'])?e(number_format((int)$file['audio_bitrate']).' bps'):'—'?></dd></div>
+            <div><dt>Media runtime</dt><dd><?=e($file['runtime'] ?? '—')?></dd></div>
+            <div><dt>Subtitles</dt><dd><?=e($file['subtitles'] ?? '—')?></dd></div>
+            <div><dt>Edition</dt><dd><?=e($file['edition'] ?? '—')?></dd></div>
             <div><dt>Release group</dt><dd><?=e($file['release_group'] ?? '—')?></dd></div>
             <div><dt>Scene name</dt><dd><?=e($file['scene_name'] ?? '—')?></dd></div>
+            <div><dt>Custom format score</dt><dd><?=e(isset($file['custom_format_score']) ? (string)$file['custom_format_score'] : '—')?></dd></div>
+            <div><dt>Original file path</dt><dd class="path-line"><?=e($file['original_file_path'] ?? '—')?></dd></div>
         </dl>
     </section>
 
