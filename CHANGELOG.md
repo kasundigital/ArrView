@@ -2,6 +2,19 @@
 
 All notable ArrView changes are documented here.
 
+## [1.0.4] - 2026-09-23
+
+### Hotfix
+
+- Fixed metadata enrichment returning PHP/HTML error output that the Admin UI tried to parse as JSON.
+- Metadata start/status endpoints now always return clean JSON and log server-side errors.
+- Added clear background-worker launch failures when PHP cannot start the metadata worker.
+- Added metadata-job heartbeat and stale-job recovery.
+- Changed large-library TMDB enrichment to stream targets instead of building one large in-memory array.
+- Added gentle request pacing for large personal/shared TMDB enrichment runs.
+- Admin now displays the real server error instead of `Unexpected token '<'`.
+
+
 ## [1.0.3] - 2026-09-23
 
 ### Fixed

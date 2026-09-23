@@ -11,7 +11,7 @@
 <p align="center">
   <a href="https://github.com/kasundigital/ArrView/stargazers"><img alt="GitHub Stars" src="https://img.shields.io/github/stars/kasundigital/ArrView?style=for-the-badge"></a>
   <a href="https://github.com/kasundigital/ArrView/pkgs/container/arrview"><img alt="GHCR" src="https://img.shields.io/badge/GHCR-arrview-blue?style=for-the-badge&logo=docker"></a>
-  <a href="https://github.com/kasundigital/ArrView"><img alt="Version" src="https://img.shields.io/badge/version-v1.0.3-7c9cff?style=for-the-badge"></a>
+  <a href="https://github.com/kasundigital/ArrView"><img alt="Version" src="https://img.shields.io/badge/version-v1.0.4-7c9cff?style=for-the-badge"></a>
   <a href="https://buymeacoffee.com/kasundigital"><img alt="Buy Me a Coffee" src="https://img.shields.io/badge/Buy%20Me%20a%20Coffee-Support%20ArrView-FFDD00?style=for-the-badge&logo=buymeacoffee&logoColor=000000"></a>
 </p>
 

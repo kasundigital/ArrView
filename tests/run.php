@@ -6,6 +6,7 @@ require_once '/app/src/SecretService.php';
 require_once '/app/src/BackupService.php';
 require_once '/app/src/Auth.php';
 require_once '/app/src/SyncJobService.php';
+require_once '/app/src/MetadataJobService.php';
 
 function ok(bool $condition, string $message): void {
     if (!$condition) {
@@ -72,6 +73,7 @@ $up=$upgraded->pdo;
 foreach(['tmdb_id','minimum_availability','availability_date','details_json','movie_file_json'] as $col) ok(in_array($col,columns($up,'movies'),true),"upgrade adds movies.{$col}");
 foreach(['tmdb_id','details_json','language_inconsistent'] as $col) ok(in_array($col,columns($up,'series'),true),"upgrade adds series.{$col}");
 foreach(['source','cancel_requested','heartbeat_at'] as $col) ok(in_array($col,columns($up,'sync_jobs'),true),"upgrade adds sync_jobs.{$col}");
+ok(in_array('heartbeat_at',columns($up,'metadata_jobs'),true),'upgrade adds metadata_jobs.heartbeat_at');
 ok((int)$up->query("SELECT COUNT(*) FROM vod_mappings")->fetchColumn()===0,'upgrade creates VOD mappings table');
 ok((string)$up->query("SELECT setting_value FROM app_settings WHERE setting_key='metadata_mode'")->fetchColumn()==='free','upgrade defaults TMDB metadata to free');
 
@@ -87,6 +89,18 @@ ok($recovered>=2,'stale queued and running sync jobs are recovered');
 foreach([$staleQueuedId,$staleRunningId] as $staleId){
     $state=(string)$pdo->query("SELECT status FROM sync_jobs WHERE id=".$staleId)->fetchColumn();
     ok($state==='failed',"stale sync job {$staleId} becomes failed");
+}
+
+// Metadata job recovery: stale enrichment must not remain queued/running forever.
+$pdo->exec("INSERT INTO metadata_jobs(status,message,created_at) VALUES('queued','old metadata queued',datetime('now','-10 minutes'))");
+$staleMetadataQueued=(int)$pdo->lastInsertId();
+$pdo->exec("INSERT INTO metadata_jobs(status,message,started_at,heartbeat_at,created_at) VALUES('running','old metadata running',datetime('now','-10 minutes'),datetime('now','-10 minutes'),datetime('now','-10 minutes'))");
+$staleMetadataRunning=(int)$pdo->lastInsertId();
+$metaRecovered=MetadataJobService::recoverStale($pdo);
+ok($metaRecovered>=2,'stale metadata jobs are recovered');
+foreach([$staleMetadataQueued,$staleMetadataRunning] as $metaId){
+    $state=(string)$pdo->query("SELECT status FROM metadata_jobs WHERE id=".$metaId)->fetchColumn();
+    ok($state==='failed',"stale metadata job {$metaId} becomes failed");
 }
 
 // Large-library stress: 50k movies, indexed sort/pagination.

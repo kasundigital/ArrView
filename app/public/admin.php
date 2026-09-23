@@ -214,6 +214,17 @@ $baseAppUrl = $scheme . '://' . $host;
 </section></main><footer>ArrView Admin</footer>
 <script>
 const sleep=ms=>new Promise(r=>setTimeout(r,ms));
+async function readJsonResponse(response){
+  const text=await response.text();
+  let data=null;
+  try{data=JSON.parse(text);}
+  catch(e){
+    const clean=text.replace(/<[^>]+>/g,' ').replace(/\s+/g,' ').trim();
+    throw new Error(clean || ('Server returned HTTP '+response.status+' instead of JSON'));
+  }
+  if(!response.ok && data && data.ok!==true) throw new Error(data.message||('HTTP '+response.status));
+  return data;
+}
 async function pollSync(jobId,row,button){
   const box=row.querySelector('.sync-progress'),count=row.querySelector('.sync-count'),percent=row.querySelector('.sync-percent'),fill=row.querySelector('.sync-fill'),current=row.querySelector('.sync-current'),cancel=row.querySelector('.sync-cancel-card-btn');
   box.hidden=false; button.disabled=true; button.textContent='Syncing...';
@@ -261,10 +272,10 @@ if(metadataButton){
     try{
       const body=new URLSearchParams({csrf_token:'<?=e($auth->csrfToken())?>'});
       const start=await fetch('/metadata-start.php',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body});
-      const started=await start.json(); if(!started.ok) throw new Error(started.message||'Could not start metadata enrichment');
+      const started=await readJsonResponse(start); if(!started.ok) throw new Error(started.message||'Could not start metadata enrichment');
       while(true){
         const r=await fetch('/metadata-status.php?job_id='+encodeURIComponent(started.job_id),{cache:'no-store'});
-        const d=await r.json(); if(!d.ok) throw new Error(d.message||'Unable to read metadata status');
+        const d=await readJsonResponse(r); if(!d.ok) throw new Error(d.message||'Unable to read metadata status');
         const n=Number(d.current||0),t=Number(d.total||0),p=Math.max(0,Math.min(100,Number(d.percent||0)));
         count.textContent=t>0?`${n.toLocaleString()} / ${t.toLocaleString()}`:`${n.toLocaleString()} items`;
         percent.textContent=p.toFixed(p%1?1:0)+'%'; fill.style.width=p+'%'; current.textContent=d.title||d.message||'Working...';
