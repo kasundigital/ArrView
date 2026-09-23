@@ -18,6 +18,9 @@ final class Database
             PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
         ]);
 
+        // Let short-lived background writes finish instead of failing a web request
+        // immediately with "database is locked".
+        $this->pdo->exec('PRAGMA busy_timeout=10000;');
         $this->pdo->exec('PRAGMA journal_mode=WAL;');
         $this->pdo->exec('PRAGMA foreign_keys=ON;');
         $this->migrate();
