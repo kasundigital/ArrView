@@ -4,6 +4,7 @@ require_once dirname(__DIR__) . '/version.php';
 require_once dirname(__DIR__) . '/src/Database.php';
 require_once dirname(__DIR__) . '/src/MetadataService.php';
 require_once dirname(__DIR__) . '/src/SecretService.php';
+require_once dirname(__DIR__) . '/src/MetadataJobService.php';
 
 $jobId=(int)($argv[1]??0);
 if($jobId<1) exit(1);
@@ -12,17 +13,23 @@ $db=new Database(rtrim($dataDir,'/').'/arrview.sqlite');
 $pdo=$db->pdo;
 $secret=new SecretService($pdo);
 $service=new MetadataService($pdo,$secret);
-$pdo->prepare("UPDATE metadata_jobs SET status='running',started_at=CURRENT_TIMESTAMP,message='Preparing metadata enrichment' WHERE id=?")->execute([$jobId]);
+MetadataJobService::recoverStale($pdo);
+$pdo->prepare("UPDATE metadata_jobs
+    SET status='running',
+        started_at=COALESCE(started_at,CURRENT_TIMESTAMP),
+        heartbeat_at=CURRENT_TIMESTAMP,
+        message='Preparing metadata enrichment'
+    WHERE id=? AND status IN ('queued','running')")->execute([$jobId]);
 
 try{
     $result=$service->enrichAll(function(int $current,int $total,string $title) use($pdo,$jobId){
-        $pdo->prepare('UPDATE metadata_jobs SET current_item=?,total_items=?,current_title=?,message=? WHERE id=?')
+        $pdo->prepare('UPDATE metadata_jobs SET current_item=?,total_items=?,current_title=?,message=?,heartbeat_at=CURRENT_TIMESTAMP WHERE id=?')
             ->execute([$current,$total,$title,'Enriching TMDB metadata',$jobId]);
     });
-    $pdo->prepare("UPDATE metadata_jobs SET status='completed',current_item=total_items,message=?,finished_at=CURRENT_TIMESTAMP WHERE id=?")
+    $pdo->prepare("UPDATE metadata_jobs SET status='completed',current_item=total_items,message=?,heartbeat_at=CURRENT_TIMESTAMP,finished_at=CURRENT_TIMESTAMP WHERE id=?")
         ->execute([$result['message']??'Metadata enrichment completed',$jobId]);
 }catch(Throwable $e){
-    $pdo->prepare("UPDATE metadata_jobs SET status='failed',message=?,finished_at=CURRENT_TIMESTAMP WHERE id=?")
+    $pdo->prepare("UPDATE metadata_jobs SET status='failed',message=?,heartbeat_at=CURRENT_TIMESTAMP,finished_at=CURRENT_TIMESTAMP WHERE id=?")
         ->execute([$e->getMessage(),$jobId]);
     fwrite(STDERR,$e->getMessage().PHP_EOL);
     exit(2);
