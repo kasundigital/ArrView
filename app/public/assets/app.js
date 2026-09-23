@@ -86,7 +86,7 @@
   }
 
   // Add mobile labels to responsive table cards.
-  document.querySelectorAll('.media-table').forEach(table => {
+  document.querySelectorAll('.media-table,.episode-table').forEach(table => {
     const labels = [...table.querySelectorAll('thead th')].map(th => th.textContent.trim().replace(/[↕▲▼]/g,'').trim());
     table.querySelectorAll('tbody tr').forEach(row => {
       [...row.children].forEach((cell,index) => {
@@ -102,8 +102,9 @@
       if (!button || button.classList.contains('sync-btn') || button.dataset.noLoading === 'true') return;
       if (button.disabled) return;
       button.classList.add('is-loading');
-      button.disabled = true;
       button.setAttribute('aria-busy','true');
+      // Do not disable the submit control here: some forms rely on a named
+      // submit button being included in POST data. CSS prevents double-clicks.
     });
   });
 })();
