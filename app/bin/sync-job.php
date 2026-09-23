@@ -64,7 +64,7 @@ try {
     $writeProgress(['status'=>'completed','current'=>$count,'total'=>$count,'percent'=>100,'title'=>'Completed','message'=>(string)($result['message'] ?? 'Sync completed')]);
 } catch (Throwable $e) {
     if ($e->getMessage() === '__ARRVIEW_SYNC_CANCELLED__') {
-        $pdo->prepare("UPDATE sync_jobs SET status='cancelled',message='Cancelled by administrator',finished_at=CURRENT_TIMESTAMP WHERE id=?")->execute([$jobId]);
+        $pdo->prepare("UPDATE sync_jobs SET status='failed',message='Cancelled by administrator',finished_at=CURRENT_TIMESTAMP WHERE id=?")->execute([$jobId]);
         $writeProgress(['status'=>'cancelled','current'=>0,'total'=>0,'percent'=>0,'title'=>'Sync cancelled','message'=>'Cancelled by administrator']);
         exit(0);
     }
