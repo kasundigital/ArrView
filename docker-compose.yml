@@ -8,6 +8,8 @@ services:
     environment:
       TZ: ${TZ:-Asia/Colombo}
       ARRVIEW_DATA: /app/data
+      # Optional. Required only if API-key encryption is enabled in System:
+      ARRVIEW_ENCRYPTION_KEY: ${ARRVIEW_ENCRYPTION_KEY:-}
       # Optional override for the shared free metadata service:
       ARRVIEW_METADATA_API_URL: ${ARRVIEW_METADATA_API_URL:-https://arrview.dashboards420.com/metadata-api.php}
       # Only set these on the official ArrView metadata service host, never on normal clients:
