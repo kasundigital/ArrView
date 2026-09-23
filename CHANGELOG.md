@@ -2,6 +2,17 @@
 
 All notable ArrView changes are documented here.
 
+## [1.0.3] - 2026-09-23
+
+### Fixed
+
+- Cache the full Radarr movie-file record separately from the movie summary.
+- When Radarr's movie response omits detailed file fields, ArrView batches requests to the official `/api/v3/moviefile` endpoint instead of leaving details blank.
+- Movie details now show filename, full/relative path, Radarr file ID, file-added date, media codecs/resolution/FPS/bit depth, audio channels/streams, subtitles, edition, release group, scene name, custom-format score, and original file path when Radarr provides them.
+- VOD mapping can now use the cached real movie-file path reliably.
+- Radarr webhook refreshes also fetch the detailed movie-file record when needed.
+
+
 ## [1.0.2] - 2026-09-23
 
 ### Hotfix
