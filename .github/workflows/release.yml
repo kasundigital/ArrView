@@ -1,19 +1,21 @@
 name: Stable release
 
 on:
-  push:
-    branches: ["main"]
-    paths:
-      - "app/version.php"
+  workflow_run:
+    workflows: ["CI and Docker image"]
+    types: [completed]
 
 permissions:
   contents: write
 
 jobs:
   release:
+    if: github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_branch == 'main'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
       - name: Read version
         id: version
         shell: bash
@@ -25,6 +27,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           VERSION: ${{ steps.version.outputs.version }}
+          TARGET_SHA: ${{ github.event.workflow_run.head_sha }}
         shell: bash
         run: |
           set -euo pipefail
@@ -34,6 +37,6 @@ jobs:
             exit 0
           fi
           gh release create "$TAG" \
-            --target "$GITHUB_SHA" \
+            --target "$TARGET_SHA" \
             --title "ArrView $TAG" \
             --notes-file RELEASE_NOTES.md
