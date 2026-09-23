@@ -5,6 +5,7 @@ require_once '/app/src/Database.php';
 require_once '/app/src/SecretService.php';
 require_once '/app/src/BackupService.php';
 require_once '/app/src/Auth.php';
+require_once '/app/src/SyncJobService.php';
 
 function ok(bool $condition, string $message): void {
     if (!$condition) {
@@ -70,9 +71,21 @@ $upgraded=new Database($legacyPath);
 $up=$upgraded->pdo;
 foreach(['tmdb_id','minimum_availability','availability_date','details_json'] as $col) ok(in_array($col,columns($up,'movies'),true),"upgrade adds movies.{$col}");
 foreach(['tmdb_id','details_json','language_inconsistent'] as $col) ok(in_array($col,columns($up,'series'),true),"upgrade adds series.{$col}");
-foreach(['source','cancel_requested'] as $col) ok(in_array($col,columns($up,'sync_jobs'),true),"upgrade adds sync_jobs.{$col}");
+foreach(['source','cancel_requested','heartbeat_at'] as $col) ok(in_array($col,columns($up,'sync_jobs'),true),"upgrade adds sync_jobs.{$col}");
 ok((int)$up->query("SELECT COUNT(*) FROM vod_mappings")->fetchColumn()===0,'upgrade creates VOD mappings table');
 ok((string)$up->query("SELECT setting_value FROM app_settings WHERE setting_key='metadata_mode'")->fetchColumn()==='free','upgrade defaults TMDB metadata to free');
+
+// Stale sync recovery: dead jobs must not remain queued/running for hours.
+$pdo->prepare("INSERT INTO sync_jobs(instance_id,status,message,source,created_at) VALUES(1,'queued','old queued','scheduled',datetime('now','-10 minutes'))")->execute();
+$staleQueuedId=(int)$pdo->lastInsertId();
+$pdo->prepare("INSERT INTO sync_jobs(instance_id,status,message,source,started_at,heartbeat_at,created_at) VALUES(1,'running','old running','scheduled',datetime('now','-10 minutes'),datetime('now','-10 minutes'),datetime('now','-10 minutes'))")->execute();
+$staleRunningId=(int)$pdo->lastInsertId();
+$recovered=SyncJobService::recoverStale($pdo);
+ok($recovered>=2,'stale queued and running sync jobs are recovered');
+foreach([$staleQueuedId,$staleRunningId] as $staleId){
+    $state=(string)$pdo->query("SELECT status FROM sync_jobs WHERE id=".$staleId)->fetchColumn();
+    ok($state==='failed',"stale sync job {$staleId} becomes failed");
+}
 
 // Large-library stress: 50k movies, indexed sort/pagination.
 $pdo->exec("INSERT INTO instances(name,type,url,api_key) VALUES('Stress Radarr','radarr','http://radarr:7878','stress-key')");
