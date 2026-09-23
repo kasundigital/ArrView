@@ -1,6 +1,8 @@
 <?php
 require_once dirname(__DIR__) . '/bootstrap.php';
+require_once dirname(__DIR__) . '/src/SyncJobService.php';
 $currentUser=$auth->requireAdmin();
+SyncJobService::recoverStale($pdo);
 
 $message=(string)($_SESSION['flash_success']??'');
 $error=(string)($_SESSION['flash_error']??'');
@@ -153,7 +155,7 @@ $label=$isCancelled?'cancelled':$job['status'];
 <article class="sync-history-row">
 <div><span class="type-pill <?=e($job['instance_type'])?>"><?=e(ucfirst($job['instance_type']))?></span><strong><?=e($job['instance_name'])?></strong><small>#<?=(int)$job['id']?> · <?=e($job['source']??'manual')?> · <?=e(systemDate($job['created_at']))?></small></div>
 <div class="sync-history-state"><span class="status-pill status-<?=e($label)?>"><?=e(ucfirst($label))?></span><small><?=e((string)($job['message']??''))?></small></div>
-<div><strong><?=number_format((int)$job['current_item'])?> / <?=number_format((int)$job['total_items'])?></strong><small><?=e(systemDate($job['finished_at']??$job['started_at']))?></small></div>
+<div><strong><?=number_format((int)$job['current_item'])?> / <?=number_format((int)$job['total_items'])?></strong><small><?=e(systemDate($job['finished_at']??$job['heartbeat_at']??$job['started_at']))?></small></div>
 <?php if(in_array($job['status'],['queued','running'],true)):?><button type="button" class="cancel-sync-btn danger-button" data-job-id="<?=(int)$job['id']?>">Cancel</button><?php endif;?>
 </article>
 <?php endforeach;?></div><?php endif;?>
