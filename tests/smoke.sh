@@ -34,14 +34,25 @@ JOB_ID="$(docker exec "$APP" php /tests/smoke-db.php seed)"
 COOKIE_JAR="/tmp/arrview-ci-cookies.txt"
 LOGIN_HTML="/tmp/arrview-ci-login.html"
 curl -fsS -c "$COOKIE_JAR" http://127.0.0.1:18080/login.php >"$LOGIN_HTML"
-CSRF="$(sed -n 's/.*name="csrf_token" value="\([^"]*\)".*/\1/p' "$LOGIN_HTML" | head -n1)"
-[ -n "$CSRF" ]
+grep -q 'Welcome back' "$LOGIN_HTML"
+CSRF="$(grep -o 'name="csrf_token" value="[^"]*"' "$LOGIN_HTML" | head -n1 | cut -d'"' -f4 || true)"
+if [ -z "$CSRF" ]; then
+  echo "FAIL: login form did not expose a CSRF token"
+  cat "$LOGIN_HTML"
+  exit 1
+fi
+echo "PASS: login form and CSRF token render"
 curl -fsS -L -b "$COOKIE_JAR" -c "$COOKIE_JAR" \
   --data-urlencode "csrf_token=$CSRF" \
   --data-urlencode "username=ciadmin" \
   --data-urlencode "password=CiPass123!" \
   http://127.0.0.1:18080/login.php > /tmp/arrview-ci-home.html
-grep -q 'ARRVIEW DASHBOARD' /tmp/arrview-ci-home.html
+if ! grep -q 'ARRVIEW DASHBOARD' /tmp/arrview-ci-home.html; then
+  echo "FAIL: authenticated request did not render dashboard"
+  docker logs "$APP" || true
+  cat /tmp/arrview-ci-home.html
+  exit 1
+fi
 grep -q 'Media overview' /tmp/arrview-ci-home.html
 echo "PASS: browser login redirects to rendered dashboard"
 docker exec "$APP" php /app/bin/sync-job.php "$JOB_ID"
