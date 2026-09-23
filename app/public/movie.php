@@ -114,6 +114,12 @@ function buildPublicMediaUrl(?string $filePath, string $localRoot, string $baseU
 }
 
 $publicMediaUrl = buildPublicMediaUrl($file['path'] ?? null, $publicLocalRoot, $publicBaseUrl);
+$movieState = movie_availability_state($cached);
+$availabilityLabel = !empty($cached['availability_date']) ? dateLabel((string)$cached['availability_date']) : '—';
+$folderYearMismatch = false;
+if (!empty($movie['path']) && !empty($movie['year']) && preg_match('/\((\d{4})\)\s*$/', (string)$movie['path'], $folderYearMatch)) {
+    $folderYearMismatch = (int)$folderYearMatch[1] !== (int)$movie['year'];
+}
 ?>
 <!doctype html>
 <html lang="en">
@@ -150,19 +156,27 @@ $publicMediaUrl = buildPublicMediaUrl($file['path'] ?? null, $publicLocalRoot, $
             <h1><?=e($movie['title'])?><?php if(!empty($movie['year'])):?> <span>(<?=e((string)$movie['year'])?>)</span><?php endif;?></h1>
             <?php if(!empty($movie['original_title']) && $movie['original_title'] !== $movie['title']):?><p class="meta"><?=e($movie['original_title'])?></p><?php endif;?>
             <div class="detail-badges">
-                <span class="table-status <?=!empty($movie['has_file'])?'status-ok':'status-missing'?>"><?=!empty($movie['has_file'])?'Available':'Missing'?></span>
+                <span class="table-status <?=e($movieState['class'])?>"><?=e($movieState['label'])?></span>
                 <span class="detail-chip"><?=!empty($movie['monitored'])?'Monitored':'Not monitored'?></span>
                 <?php if(!empty($movie['status'])):?><span class="detail-chip"><?=e(ucfirst((string)$movie['status']))?></span><?php endif;?>
             </div>
             <?php if(!empty($movie['overview'])):?><p class="movie-overview"><?=e($movie['overview'])?></p><?php endif;?>
             <div class="detail-actions">
-                <?php if(empty($movie['has_file'])):?><a class="table-action important" href="/diagnose.php?id=<?=$id?>">Why missing?</a><?php endif;?>
+                <?php if(!empty($movieState['diagnosable'])):?><a class="table-action important" href="/diagnose.php?id=<?=$id?>">Why missing?</a><?php endif;?>
                 <?php if(!empty($movie['title_slug'])):?><a class="table-action" href="<?=e(rtrim($instance['url'],'/').'/movie/'.$movie['title_slug'])?>" target="_blank" rel="noopener noreferrer">Open in Radarr ↗</a><?php else:?><a class="table-action" href="<?=e(rtrim($instance['url'],'/'))?>" target="_blank" rel="noopener noreferrer">Open Radarr ↗</a><?php endif;?>
                 <?php if($tmdbId>0):?><a class="table-action tmdb-link" href="https://www.themoviedb.org/movie/<?=$tmdbId?>" target="_blank" rel="noopener noreferrer">TMDB #<?=$tmdbId?> ↗</a><?php endif;?>
                 <?php if(!empty($tmdb['imdb_id'])):?><a class="table-action" href="https://www.imdb.com/title/<?=e($tmdb['imdb_id'])?>/" target="_blank" rel="noopener noreferrer">IMDb ↗</a><?php endif;?>
             </div>
         </div>
     </section>
+
+    <?php if(($movieState['key'] ?? '')==='upcoming'):?>
+    <div class="notice info availability-notice"><strong>Upcoming — not released yet.</strong> Radarr is monitoring this title for its future availability. It is not counted as a missing movie.</div>
+    <?php elseif(($movieState['key'] ?? '')==='unknown'):?>
+    <div class="notice info availability-notice"><strong>Availability unknown.</strong> Radarr does not currently provide a usable availability date for this movie, so ArrView does not count it as missing.</div>
+    <?php elseif(($movieState['key'] ?? '')==='unmonitored'):?>
+    <div class="notice info availability-notice"><strong>Not monitored.</strong> ArrView does not count this movie as an active missing item.</div>
+    <?php endif;?>
 
     <section class="detail-grid">
         <div class="detail-card"><span>Audio Language</span><strong><?=e($file['languages'] ?? $cached['audio_languages'] ?? 'Unknown')?></strong></div>
@@ -171,6 +185,8 @@ $publicMediaUrl = buildPublicMediaUrl($file['path'] ?? null, $publicLocalRoot, $
         <div class="detail-card"><span>Runtime</span><strong><?=!empty($movie['runtime'])?e((string)$movie['runtime']).' min':'—'?></strong></div>
         <div class="detail-card"><span>Studio</span><strong><?=e($movie['studio'] ?? '—')?></strong></div>
         <div class="detail-card"><span>Instance</span><strong><?=e($instance['name'])?></strong></div>
+        <div class="detail-card"><span>Minimum Availability</span><strong><?=e($cached['minimum_availability'] ?: 'Unknown')?></strong></div>
+        <div class="detail-card"><span>Expected Availability</span><strong><?=e($availabilityLabel)?></strong></div>
     </section>
 
     <?php if($publicMediaUrl):?>
@@ -206,6 +222,18 @@ $publicMediaUrl = buildPublicMediaUrl($file['path'] ?? null, $publicLocalRoot, $
         <?php endif;?>
     </section>
     <?php endif;?>
+
+    <section class="panel availability-panel">
+        <div class="panel-heading-inline"><h2>Release availability</h2><span class="table-status <?=e($movieState['class'])?>"><?=e($movieState['label'])?></span></div>
+        <dl class="detail-list">
+            <div><dt>Minimum availability</dt><dd><?=e($cached['minimum_availability'] ?: 'Unknown')?></dd></div>
+            <div><dt>In cinemas</dt><dd><?=e(dateLabel($cached['in_cinemas'] ?? null))?></dd></div>
+            <div><dt>Digital release</dt><dd><?=e(dateLabel($cached['digital_release'] ?? null))?></dd></div>
+            <div><dt>Physical release</dt><dd><?=e(dateLabel($cached['physical_release'] ?? null))?></dd></div>
+            <div><dt>ArrView availability date</dt><dd><?=e($availabilityLabel)?></dd></div>
+        </dl>
+        <?php if($folderYearMismatch):?><div class="notice info compact-notice">The movie folder year differs from Radarr's current movie year. This is metadata information only and does not make the title missing.</div><?php endif;?>
+    </section>
 
     <section class="panel">
         <h2>File information</h2>
