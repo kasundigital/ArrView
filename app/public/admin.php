@@ -79,6 +79,7 @@ $baseAppUrl = $scheme . '://' . $host;
 <header class="topbar"><a class="brand" href="/">ArrView <small class="version-chip">v<?=e(ARRVIEW_VERSION)?></small></a><nav><a href="/">Library</a><a class="active" href="/admin.php">Instances</a><a href="/users.php">Users</a><a href="/system.php">System</a><a href="/support.php">Support</a><span class="user-chip"><?=e($currentUser['username'])?></span><a href="/logout.php">Logout</a></nav></header>
 <main class="wrap admin-wrap"><section class="catalog-head"><div><p class="eyebrow">SETTINGS</p><h1>Instances</h1></div></section>
 <?php if($message):?><div class="notice success"><?=e($message)?></div><?php endif;?><?php if($error):?><div class="notice error"><?=e($error)?></div><?php endif;?>
+<?php if(!empty($metadataSettings['credential_error'])):?><div class="notice error"><strong>TMDB credential unavailable:</strong> <?=e($metadataSettings['credential_error'])?> Configure the same ARRVIEW_ENCRYPTION_KEY used when encryption was enabled.</div><?php endif;?>
 <section class="panel metadata-panel">
   <div class="panel-heading-inline metadata-panel-head">
     <div><p class="eyebrow">METADATA</p><h2>TMDB Metadata</h2></div>
