@@ -30,6 +30,20 @@ grep -q '"ok":true' /tmp/arrview-health.json
 echo "PASS: fresh Docker install health check"
 
 JOB_ID="$(docker exec "$APP" php /tests/smoke-db.php seed)"
+
+COOKIE_JAR="/tmp/arrview-ci-cookies.txt"
+LOGIN_HTML="/tmp/arrview-ci-login.html"
+curl -fsS -c "$COOKIE_JAR" http://127.0.0.1:18080/login.php >"$LOGIN_HTML"
+CSRF="$(sed -n 's/.*name="csrf_token" value="\([^"]*\)".*/\1/p' "$LOGIN_HTML" | head -n1)"
+[ -n "$CSRF" ]
+curl -fsS -L -b "$COOKIE_JAR" -c "$COOKIE_JAR" \
+  --data-urlencode "csrf_token=$CSRF" \
+  --data-urlencode "username=ciadmin" \
+  --data-urlencode "password=CiPass123!" \
+  http://127.0.0.1:18080/login.php > /tmp/arrview-ci-home.html
+grep -q 'ARRVIEW DASHBOARD' /tmp/arrview-ci-home.html
+grep -q 'Media overview' /tmp/arrview-ci-home.html
+echo "PASS: browser login redirects to rendered dashboard"
 docker exec "$APP" php /app/bin/sync-job.php "$JOB_ID"
 MOVIES="$(docker exec "$APP" php /tests/smoke-db.php movie-count)"
 [ "$MOVIES" = "2" ]
