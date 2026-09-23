@@ -2,21 +2,20 @@
 declare(strict_types=1);
 
 require_once dirname(__DIR__) . '/src/Database.php';
+require_once dirname(__DIR__) . '/src/SyncJobService.php';
 
 $dataDir=getenv('ARRVIEW_DATA') ?: dirname(__DIR__) . '/data';
 $databasePath=rtrim($dataDir,'/').'/arrview.sqlite';
 $once=in_array('--once',$argv,true);
 
 function schedulerRun(PDO $pdo): void {
+    // Recovery must run even when automatic scheduling is disabled.
+    SyncJobService::recoverStale($pdo);
+
     $stmt=$pdo->prepare("SELECT setting_value FROM app_settings WHERE setting_key='sync_interval_hours' LIMIT 1");
     $stmt->execute();
     $hours=max(0,min(168,(int)($stmt->fetchColumn() ?: 12)));
     if($hours===0)return;
-
-    // Recover stale jobs so one crashed worker never blocks scheduled sync forever.
-    $pdo->exec("UPDATE sync_jobs SET status='failed',message='Stale scheduled sync recovered',finished_at=CURRENT_TIMESTAMP
-        WHERE status IN ('queued','running')
-          AND datetime(COALESCE(started_at,created_at)) < datetime('now','-6 hours')");
 
     $query=$pdo->query("SELECT id FROM instances
         WHERE enabled=1

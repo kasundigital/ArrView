@@ -1,28 +1,15 @@
-# ArrView v1.0.1 — Hotfix
+# ArrView v1.0.2 — Sync Liveness Hotfix
 
-This release fixes a post-login blank/white dashboard that could occur when automatic sync started at the same time as the redirected home page.
+This release fixes Recent Jobs showing **Queued** or **Running** when no sync worker is actually active.
 
 ## Fixes
 
-- Removed the legacy per-web-request automatic reconciliation worker.
-- The dedicated container scheduler is now the single owner of scheduled full syncs.
-- Added SQLite busy waiting so short background writes do not immediately fail a web request.
-- Added an authenticated browser regression test for the complete login → dashboard flow.
+- Sync workers now update a database heartbeat while processing.
+- Queued jobs that never start are recovered after 3 minutes.
+- Running jobs with no heartbeat are recovered after 5 minutes.
+- Recovery runs every scheduler cycle even when automatic full sync is disabled.
+- Opening **System** also reconciles stale job state before rendering.
+- Terminal database state overrides stale progress JSON.
+- Cancelling a queued job now ends it immediately.
 
-## Upgrade
-
-Keep the existing `arrview-data` volume:
-
-```bash
-docker pull ghcr.io/kasundigital/arrview:latest
-docker stop arrview
-docker rm arrview
-docker run -d \
-  --name arrview \
-  --restart unless-stopped \
-  -p 3223:8080 \
-  -v arrview-data:/app/data \
-  ghcr.io/kasundigital/arrview:latest
-```
-
-No database reset is required.
+Existing stale jobs are corrected automatically after upgrade; no database reset is required.
