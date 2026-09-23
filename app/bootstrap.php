@@ -19,7 +19,7 @@ $secret = new SecretService($pdo);
 $backup = new BackupService($pdo, $databasePath);
 $arr = new ArrService($pdo);
 $batchSync = new BatchSyncService($pdo);
-$metadata = new MetadataService($pdo);
+$metadata = new MetadataService($pdo, $secret);
 $auth = new Auth($pdo);
 
 // Lightweight self-healing reconciliation: normal pages read SQLite only.
