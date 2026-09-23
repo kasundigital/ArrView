@@ -24,10 +24,14 @@ final class BatchSyncService
             $seen = [];
             $count = 0;
             $sql = <<<'SQL'
-INSERT INTO movies (instance_id, remote_id, tmdb_id, imdb_id, title, year, poster_url, has_file, monitored, quality, audio_languages, path, file_size, details_json, updated_at)
-VALUES (:instance_id, :remote_id, :tmdb_id, :imdb_id, :title, :year, :poster_url, :has_file, :monitored, :quality, :audio_languages, :path, :file_size, :details_json, CURRENT_TIMESTAMP)
+INSERT INTO movies (instance_id, remote_id, tmdb_id, imdb_id, minimum_availability, in_cinemas, digital_release, physical_release, availability_date, title, year, poster_url, has_file, monitored, quality, audio_languages, path, file_size, details_json, updated_at)
+VALUES (:instance_id, :remote_id, :tmdb_id, :imdb_id, :minimum_availability, :in_cinemas, :digital_release, :physical_release, :availability_date, :title, :year, :poster_url, :has_file, :monitored, :quality, :audio_languages, :path, :file_size, :details_json, CURRENT_TIMESTAMP)
 ON CONFLICT(instance_id, remote_id) DO UPDATE SET
- tmdb_id=excluded.tmdb_id, imdb_id=excluded.imdb_id, title=excluded.title, year=excluded.year, poster_url=excluded.poster_url,
+ tmdb_id=excluded.tmdb_id, imdb_id=excluded.imdb_id,
+ minimum_availability=excluded.minimum_availability, in_cinemas=excluded.in_cinemas,
+ digital_release=excluded.digital_release, physical_release=excluded.physical_release,
+ availability_date=excluded.availability_date,
+ title=excluded.title, year=excluded.year, poster_url=excluded.poster_url,
  has_file=excluded.has_file, monitored=excluded.monitored, quality=excluded.quality,
  audio_languages=excluded.audio_languages, path=excluded.path, file_size=excluded.file_size,
  details_json=excluded.details_json, updated_at=CURRENT_TIMESTAMP
@@ -40,10 +44,16 @@ SQL;
                     if (!$remoteId) continue;
                     $seen[] = $remoteId;
                     $movieFile = $movie['movieFile'] ?? null;
+                    $availability = $this->movieAvailability($movie);
                     $stmt->execute([
                         ':instance_id' => (int)$instance['id'], ':remote_id' => $remoteId,
                         ':tmdb_id' => !empty($movie['tmdbId']) ? (int)$movie['tmdbId'] : null,
                         ':imdb_id' => $movie['imdbId'] ?? null,
+                        ':minimum_availability' => $availability['minimum_availability'],
+                        ':in_cinemas' => $availability['in_cinemas'],
+                        ':digital_release' => $availability['digital_release'],
+                        ':physical_release' => $availability['physical_release'],
+                        ':availability_date' => $availability['availability_date'],
                         ':title' => (string)($movie['title'] ?? 'Unknown'), ':year' => $movie['year'] ?? null,
                         ':poster_url' => $this->poster($movie['images'] ?? []), ':has_file' => !empty($movie['hasFile']) ? 1 : 0,
                         ':monitored' => !empty($movie['monitored']) ? 1 : 0, ':quality' => $this->quality($movieFile),
@@ -84,7 +94,11 @@ SQL;
 INSERT INTO series (instance_id, remote_id, tmdb_id, imdb_id, title, year, poster_url, monitored, episode_count, episode_file_count, audio_languages, path, details_json, updated_at)
 VALUES (:instance_id, :remote_id, :tmdb_id, :imdb_id, :title, :year, :poster_url, :monitored, :episode_count, :episode_file_count, :audio_languages, :path, :details_json, CURRENT_TIMESTAMP)
 ON CONFLICT(instance_id, remote_id) DO UPDATE SET
- tmdb_id=excluded.tmdb_id, imdb_id=excluded.imdb_id, title=excluded.title, year=excluded.year, poster_url=excluded.poster_url,
+ tmdb_id=excluded.tmdb_id, imdb_id=excluded.imdb_id,
+ minimum_availability=excluded.minimum_availability, in_cinemas=excluded.in_cinemas,
+ digital_release=excluded.digital_release, physical_release=excluded.physical_release,
+ availability_date=excluded.availability_date,
+ title=excluded.title, year=excluded.year, poster_url=excluded.poster_url,
  monitored=excluded.monitored, episode_count=excluded.episode_count,
  episode_file_count=excluded.episode_file_count, audio_languages=COALESCE(excluded.audio_languages, series.audio_languages),
  path=excluded.path, details_json=excluded.details_json, updated_at=CURRENT_TIMESTAMP
@@ -321,12 +335,17 @@ SQL;
     {
         $movie = $this->requestJson($instance, '/api/v3/movie/' . $movieId);
         $movieFile = is_array($movie['movieFile'] ?? null) ? $movie['movieFile'] : null;
+        $availability = $this->movieAvailability($movie);
 
         $sql = <<<'SQL'
-INSERT INTO movies (instance_id, remote_id, tmdb_id, imdb_id, title, year, poster_url, has_file, monitored, quality, audio_languages, path, file_size, details_json, updated_at)
-VALUES (:instance_id, :remote_id, :tmdb_id, :imdb_id, :title, :year, :poster_url, :has_file, :monitored, :quality, :audio_languages, :path, :file_size, :details_json, CURRENT_TIMESTAMP)
+INSERT INTO movies (instance_id, remote_id, tmdb_id, imdb_id, minimum_availability, in_cinemas, digital_release, physical_release, availability_date, title, year, poster_url, has_file, monitored, quality, audio_languages, path, file_size, details_json, updated_at)
+VALUES (:instance_id, :remote_id, :tmdb_id, :imdb_id, :minimum_availability, :in_cinemas, :digital_release, :physical_release, :availability_date, :title, :year, :poster_url, :has_file, :monitored, :quality, :audio_languages, :path, :file_size, :details_json, CURRENT_TIMESTAMP)
 ON CONFLICT(instance_id, remote_id) DO UPDATE SET
- tmdb_id=excluded.tmdb_id, imdb_id=excluded.imdb_id, title=excluded.title, year=excluded.year, poster_url=excluded.poster_url,
+ tmdb_id=excluded.tmdb_id, imdb_id=excluded.imdb_id,
+ minimum_availability=excluded.minimum_availability, in_cinemas=excluded.in_cinemas,
+ digital_release=excluded.digital_release, physical_release=excluded.physical_release,
+ availability_date=excluded.availability_date,
+ title=excluded.title, year=excluded.year, poster_url=excluded.poster_url,
  has_file=excluded.has_file, monitored=excluded.monitored, quality=excluded.quality,
  audio_languages=excluded.audio_languages, path=excluded.path, file_size=excluded.file_size,
  details_json=excluded.details_json, updated_at=CURRENT_TIMESTAMP
@@ -337,6 +356,11 @@ SQL;
             ':remote_id'=>$movieId,
             ':tmdb_id'=>!empty($movie['tmdbId']) ? (int)$movie['tmdbId'] : null,
             ':imdb_id'=>$movie['imdbId'] ?? null,
+            ':minimum_availability'=>$availability['minimum_availability'],
+            ':in_cinemas'=>$availability['in_cinemas'],
+            ':digital_release'=>$availability['digital_release'],
+            ':physical_release'=>$availability['physical_release'],
+            ':availability_date'=>$availability['availability_date'],
             ':title'=>(string)($movie['title'] ?? 'Unknown'),
             ':year'=>$movie['year'] ?? null,
             ':poster_url'=>$this->poster($movie['images'] ?? []),
@@ -361,7 +385,11 @@ SQL;
 INSERT INTO series (instance_id, remote_id, tmdb_id, imdb_id, title, year, poster_url, monitored, episode_count, episode_file_count, audio_languages, path, details_json, updated_at)
 VALUES (:instance_id, :remote_id, :tmdb_id, :imdb_id, :title, :year, :poster_url, :monitored, :episode_count, :episode_file_count, :audio_languages, :path, :details_json, CURRENT_TIMESTAMP)
 ON CONFLICT(instance_id, remote_id) DO UPDATE SET
- tmdb_id=excluded.tmdb_id, imdb_id=excluded.imdb_id, title=excluded.title, year=excluded.year, poster_url=excluded.poster_url,
+ tmdb_id=excluded.tmdb_id, imdb_id=excluded.imdb_id,
+ minimum_availability=excluded.minimum_availability, in_cinemas=excluded.in_cinemas,
+ digital_release=excluded.digital_release, physical_release=excluded.physical_release,
+ availability_date=excluded.availability_date,
+ title=excluded.title, year=excluded.year, poster_url=excluded.poster_url,
  monitored=excluded.monitored, episode_count=excluded.episode_count,
  episode_file_count=excluded.episode_file_count, path=excluded.path, details_json=excluded.details_json, updated_at=CURRENT_TIMESTAMP
 SQL;
@@ -496,6 +524,54 @@ SQL;
             throw $e;
         }
         $this->markSync((int)$instance['id'], 'Webhook update - series refreshed');
+    }
+
+
+    private function movieAvailability(array $movie): array
+    {
+        $minimum = (string)($movie['minimumAvailability'] ?? '');
+        $inCinemas = $this->normalizeDate($movie['inCinemas'] ?? null);
+        $digital = $this->normalizeDate($movie['digitalRelease'] ?? null);
+        $physical = $this->normalizeDate($movie['physicalRelease'] ?? null);
+
+        $availabilityDate = null;
+        switch (strtolower($minimum)) {
+            case 'incinemas':
+                $availabilityDate = $inCinemas;
+                break;
+            case 'released':
+                $releaseDates = array_values(array_filter([$digital, $physical]));
+                if ($releaseDates) {
+                    sort($releaseDates);
+                    $availabilityDate = $releaseDates[0];
+                } else {
+                    $availabilityDate = $inCinemas;
+                }
+                break;
+            case 'announced':
+            case 'tba':
+            default:
+                $availabilityDate = null;
+                break;
+        }
+
+        return [
+            'minimum_availability' => $minimum !== '' ? $minimum : null,
+            'in_cinemas' => $inCinemas,
+            'digital_release' => $digital,
+            'physical_release' => $physical,
+            'availability_date' => $availabilityDate,
+        ];
+    }
+
+    private function normalizeDate(mixed $value): ?string
+    {
+        if (!is_string($value) || trim($value) === '') return null;
+        try {
+            return (new DateTimeImmutable($value))->setTimezone(new DateTimeZone('UTC'))->format('Y-m-d H:i:s');
+        } catch (Throwable) {
+            return null;
+        }
     }
 
     private function requestJson(array $instance, string $path): array

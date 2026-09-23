@@ -49,6 +49,53 @@ if (PHP_SAPI !== 'cli') {
 }
 
 
+
+function movie_availability_state(array $movie): array
+{
+    if (!empty($movie['has_file'])) {
+        return ['key'=>'available','label'=>'Available','class'=>'status-ok','diagnosable'=>false,'problem'=>false];
+    }
+
+    if (isset($movie['monitored']) && !(int)$movie['monitored']) {
+        return ['key'=>'unmonitored','label'=>'Unmonitored','class'=>'status-muted','diagnosable'=>false,'problem'=>false];
+    }
+
+    $availability = trim((string)($movie['availability_date'] ?? ''));
+    if ($availability !== '') {
+        try {
+            $availableAt = new DateTimeImmutable($availability, new DateTimeZone('UTC'));
+            $now = new DateTimeImmutable('now', new DateTimeZone('UTC'));
+            if ($availableAt > $now) {
+                return [
+                    'key'=>'upcoming',
+                    'label'=>'Upcoming',
+                    'class'=>'status-upcoming',
+                    'diagnosable'=>false,
+                    'problem'=>false,
+                    'availability_date'=>$availability,
+                ];
+            }
+            return [
+                'key'=>'missing',
+                'label'=>'Missing',
+                'class'=>'status-missing',
+                'diagnosable'=>true,
+                'problem'=>true,
+                'availability_date'=>$availability,
+            ];
+        } catch (Throwable) {
+        }
+    }
+
+    return [
+        'key'=>'unknown',
+        'label'=>'Unknown Availability',
+        'class'=>'status-warning',
+        'diagnosable'=>false,
+        'problem'=>false,
+    ];
+}
+
 function asset_url(string $path): string
 {
     $separator = str_contains($path, '?') ? '&' : '?';

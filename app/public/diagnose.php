@@ -14,7 +14,8 @@ if (!$movie) {
 
 $result = null;
 $error = null;
-if (!empty($movie['has_file'])) {
+$movieState = movie_availability_state($movie);
+if ($movieState['key'] === 'available') {
     $result = [
         'status'=>'available',
         'summary'=>'This movie is already available.',
@@ -24,6 +25,64 @@ if (!empty($movie['has_file'])) {
         'blocklist'=>[],
         'queue'=>[],
         'history'=>[],
+    ];
+} elseif ($movieState['key'] === 'upcoming') {
+    $result = [
+        'status'=>'upcoming',
+        'summary'=>'This movie is not expected to be available yet.',
+        'diagnosis'=>[
+            'label'=>'Upcoming — not released yet',
+            'severity'=>'good',
+            'detail'=>'No action is required. Radarr is monitoring this title for its future availability and ArrView does not count it as missing.',
+        ],
+        'categories'=>[],
+        'releases'=>[],
+        'blocklist'=>[],
+        'queue'=>[],
+        'history'=>[],
+        'deep_performed'=>false,
+        'movie'=>[
+            'monitored'=>(bool)$movie['monitored'],
+            'minimumAvailability'=>$movie['minimum_availability'] ?: 'Unknown',
+            'availabilityDate'=>$movie['availability_date'] ?? null,
+        ],
+    ];
+} elseif ($movieState['key'] === 'unmonitored') {
+    $result = [
+        'status'=>'unmonitored',
+        'summary'=>'This movie is not monitored.',
+        'diagnosis'=>[
+            'label'=>'Not monitored',
+            'severity'=>'warning',
+            'detail'=>'Radarr is not monitoring this movie. ArrView does not count it as an active missing item.',
+        ],
+        'categories'=>[],
+        'releases'=>[],
+        'blocklist'=>[],
+        'queue'=>[],
+        'history'=>[],
+        'deep_performed'=>false,
+    ];
+} elseif ($movieState['key'] === 'unknown') {
+    $result = [
+        'status'=>'unknown',
+        'summary'=>'Release availability is unknown.',
+        'diagnosis'=>[
+            'label'=>'Availability unknown',
+            'severity'=>'warning',
+            'detail'=>'Radarr does not currently provide a usable availability date. ArrView does not count this title as missing until availability can be determined.',
+        ],
+        'categories'=>[],
+        'releases'=>[],
+        'blocklist'=>[],
+        'queue'=>[],
+        'history'=>[],
+        'deep_performed'=>false,
+        'movie'=>[
+            'monitored'=>(bool)$movie['monitored'],
+            'minimumAvailability'=>$movie['minimum_availability'] ?: 'Unknown',
+            'availabilityDate'=>null,
+        ],
     ];
 } else {
     try {
@@ -87,7 +146,7 @@ if (!empty($movie['has_file'])) {
   <span class="diagnosis-state"><?=e(strtoupper($diag['severity'] ?? 'warning'))?></span>
 </section>
 
-<?php if(empty($result['deep_performed']) && empty($movie['has_file'])):?>
+<?php if(empty($result['deep_performed']) && !empty($movieState['diagnosable'])):?>
 <section class="panel deep-search-cta">
   <h2>Need indexer-level reasons?</h2>
   <p class="muted">Run Deep Search only when needed. Results are streamed and capped to protect ArrView from huge Radarr release responses.</p>
@@ -102,7 +161,8 @@ if (!empty($movie['has_file'])) {
     <div><span>Monitored</span><strong><?=$result['movie']['monitored']?'Yes':'No'?></strong></div>
     <div><span>Minimum availability</span><strong><?=e((string)($result['movie']['minimumAvailability'] ?? 'Unknown'))?></strong></div>
     <div><span>Quality profile ID</span><strong><?=e((string)($result['movie']['qualityProfileId'] ?? 'Unknown'))?></strong></div>
-    <div><span>Acceptable releases now</span><strong><?=(int)($result['accepted_count'] ?? 0)?></strong></div>
+    <?php if(!empty($result['movie']['availabilityDate']) || !empty($movie['availability_date'])):?><div><span>Expected availability</span><strong><?=e((string)($result['movie']['availabilityDate'] ?? $movie['availability_date']))?></strong></div><?php endif;?>
+    <?php if(!empty($movieState['diagnosable'])):?><div><span>Acceptable releases now</span><strong><?=(int)($result['accepted_count'] ?? 0)?></strong></div><?php endif;?>
   </div>
 </section>
 <?php endif;?>
@@ -198,6 +258,6 @@ if (!empty($movie['has_file'])) {
 
 <?php endif;?>
 </main>
-<footer>ArrView v<?=e(ARRVIEW_VERSION)?> · Radarr missing movie diagnostics</footer>
+<footer>ArrView v<?=e(ARRVIEW_VERSION)?> · Radarr availability diagnostics</footer>
 </body>
 </html>

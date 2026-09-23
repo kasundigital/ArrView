@@ -55,6 +55,11 @@ CREATE TABLE IF NOT EXISTS movies (
     remote_id INTEGER NOT NULL,
     tmdb_id INTEGER NULL,
     imdb_id TEXT NULL,
+    minimum_availability TEXT NULL,
+    in_cinemas TEXT NULL,
+    digital_release TEXT NULL,
+    physical_release TEXT NULL,
+    availability_date TEXT NULL,
     title TEXT NOT NULL,
     year INTEGER NULL,
     poster_url TEXT NULL,
@@ -274,6 +279,17 @@ SQL);
         if (!in_array('imdb_id', $movieColumnNames, true)) {
             $this->pdo->exec('ALTER TABLE movies ADD COLUMN imdb_id TEXT NULL');
         }
+        foreach ([
+            'minimum_availability' => 'TEXT NULL',
+            'in_cinemas' => 'TEXT NULL',
+            'digital_release' => 'TEXT NULL',
+            'physical_release' => 'TEXT NULL',
+            'availability_date' => 'TEXT NULL',
+        ] as $name => $definition) {
+            if (!in_array($name, $movieColumnNames, true)) {
+                $this->pdo->exec("ALTER TABLE movies ADD COLUMN {$name} {$definition}");
+            }
+        }
 
         $seriesColumnNames = array_column($this->pdo->query('PRAGMA table_info(series)')->fetchAll(), 'name');
         foreach ([
@@ -289,7 +305,42 @@ SQL);
             }
         }
 
+        // Backfill availability from the Radarr JSON already cached by older ArrView versions.
+        // This makes upgrades immediately availability-aware without waiting for the next full sync.
+        try {
+            $this->pdo->exec(<<<'SQL'
+UPDATE movies
+SET
+    minimum_availability = COALESCE(minimum_availability, json_extract(details_json, '$.minimumAvailability')),
+    in_cinemas = COALESCE(in_cinemas, json_extract(details_json, '$.inCinemas')),
+    digital_release = COALESCE(digital_release, json_extract(details_json, '$.digitalRelease')),
+    physical_release = COALESCE(physical_release, json_extract(details_json, '$.physicalRelease')),
+    availability_date = COALESCE(
+        availability_date,
+        CASE lower(COALESCE(json_extract(details_json, '$.minimumAvailability'), ''))
+            WHEN 'incinemas' THEN json_extract(details_json, '$.inCinemas')
+            WHEN 'released' THEN
+                CASE
+                    WHEN json_extract(details_json, '$.digitalRelease') IS NOT NULL
+                         AND json_extract(details_json, '$.physicalRelease') IS NOT NULL
+                    THEN min(json_extract(details_json, '$.digitalRelease'), json_extract(details_json, '$.physicalRelease'))
+                    ELSE COALESCE(
+                        json_extract(details_json, '$.digitalRelease'),
+                        json_extract(details_json, '$.physicalRelease'),
+                        json_extract(details_json, '$.inCinemas')
+                    )
+                END
+            ELSE NULL
+        END
+    )
+WHERE details_json IS NOT NULL;
+SQL);
+        } catch (Throwable) {
+            // Older SQLite builds without JSON functions can wait for the next Radarr sync.
+        }
+
         $this->pdo->exec('CREATE INDEX IF NOT EXISTS idx_movies_tmdb ON movies(tmdb_id)');
+        $this->pdo->exec('CREATE INDEX IF NOT EXISTS idx_movies_availability ON movies(has_file, availability_date, monitored)');
         $this->pdo->exec('CREATE INDEX IF NOT EXISTS idx_series_tmdb ON series(tmdb_id)');
     }
 }
