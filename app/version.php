@@ -2,4 +2,4 @@
 
 declare(strict_types=1);
 
-const ARRVIEW_VERSION = '1.0.2';
+const ARRVIEW_VERSION = '1.0.3';
