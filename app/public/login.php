@@ -5,8 +5,12 @@ if ($auth->user()) redirect('/');
 $error = '';
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     try { $auth->requireCsrf($_POST['csrf_token'] ?? null); } catch (Throwable $e) { $error = $e->getMessage(); }
-    if ($error === '' && $auth->login($_POST['username'] ?? '', $_POST['password'] ?? '')) redirect('/');
-    $error = 'Invalid username or password.';
+    $username = (string)($_POST['username'] ?? '');
+    if ($error === '' && $auth->login($username, $_POST['password'] ?? '')) redirect('/');
+    $wait = $auth->loginLockSeconds($username);
+    $error = $wait > 0
+        ? 'Too many failed sign-in attempts. Try again in ' . max(1, (int)ceil($wait / 60)) . ' minute(s).'
+        : 'Invalid username or password.';
 }
 ?>
 <!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Login · ArrView</title><link rel="stylesheet" href="/assets/style.css"></head><body>
