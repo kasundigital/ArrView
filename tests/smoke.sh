@@ -42,11 +42,16 @@ if [ -z "$CSRF" ]; then
   exit 1
 fi
 echo "PASS: login form and CSRF token render"
-curl -fsS -L -b "$COOKIE_JAR" -c "$COOKIE_JAR" \
+LOGIN_STATUS="$(curl -sS -o /tmp/arrview-ci-login-post.html -w '%{http_code}' -b "$COOKIE_JAR" -c "$COOKIE_JAR" \
   --data-urlencode "csrf_token=$CSRF" \
   --data-urlencode "username=ciadmin" \
   --data-urlencode "password=CiPass123!" \
-  http://127.0.0.1:18080/login.php > /tmp/arrview-ci-home.html
+  http://127.0.0.1:18080/login.php)"
+[ "$LOGIN_STATUS" = "302" ]
+HOME_STATUS="$(curl -sS -o /tmp/arrview-ci-home.html -w '%{http_code}' -b "$COOKIE_JAR" http://127.0.0.1:18080/)"
+[ "$HOME_STATUS" = "200" ]
+HOME_BYTES="$(wc -c < /tmp/arrview-ci-home.html | tr -d ' ')"
+echo "INFO: authenticated dashboard response is $HOME_BYTES bytes"
 if ! grep -q 'ARRVIEW DASHBOARD' /tmp/arrview-ci-home.html; then
   echo "FAIL: authenticated request did not render dashboard"
   docker logs "$APP" || true
