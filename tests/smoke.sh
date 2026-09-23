@@ -1,6 +1,8 @@
 #!/bin/sh
 set -eu
 
+echo "INFO: starting ArrView Docker smoke test"
+
 IMAGE="arrview-ci"
 NET="arrview-ci-net"
 APP="arrview-ci-app"
@@ -15,13 +17,17 @@ cleanup() {
 trap cleanup EXIT
 cleanup || true
 
+echo "INFO: creating smoke network and volume"
 docker network create "$NET" >/dev/null
 docker volume create "$VOL" >/dev/null
 
+echo "INFO: starting mock Radarr"
 docker run -d --name "$MOCK" --network "$NET" -v "$PWD/tests:/tests:ro" "$IMAGE"   php -S 0.0.0.0:7878 /tests/mock-arr.php >/dev/null
 
+echo "INFO: starting ArrView app"
 docker run -d --name "$APP" --network "$NET" -p 18080:8080 -v "$VOL:/app/data" -v "$PWD/tests:/tests:ro" "$IMAGE" >/dev/null
 
+echo "INFO: waiting for ArrView health"
 i=0
 until curl -fsS http://127.0.0.1:18080/health.php >/tmp/arrview-health.json; do
   i=$((i+1)); [ "$i" -gt 30 ] && { docker logs "$APP"; exit 1; }; sleep 1
@@ -60,7 +66,13 @@ if ! grep -q 'ARRVIEW DASHBOARD' /tmp/arrview-ci-home.html; then
 fi
 grep -q 'Media overview' /tmp/arrview-ci-home.html
 echo "PASS: browser login redirects to rendered dashboard"
-docker exec "$APP" php /app/bin/sync-job.php "$JOB_ID"
+echo "INFO: running Radarr full sync job $JOB_ID"
+if ! docker exec "$APP" php /app/bin/sync-job.php "$JOB_ID"; then
+  echo "FAIL: sync worker exited non-zero"
+  docker logs "$APP" || true
+  docker logs "$MOCK" || true
+  exit 1
+fi
 MOVIES="$(docker exec "$APP" php /tests/smoke-db.php movie-count)"
 [ "$MOVIES" = "2" ]
 echo "PASS: mock Radarr full sync imported 2 movies"
