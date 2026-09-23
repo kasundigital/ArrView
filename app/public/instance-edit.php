@@ -11,7 +11,7 @@ if($_SERVER['REQUEST_METHOD']==='POST'){
     $name=trim($_POST['name']??'');$type=$_POST['type']??'';$url=rtrim(trim($_POST['url']??''),'/');$apiKey=trim($_POST['api_key']??'');
     if($name===''||!in_array($type,['radarr','sonarr'],true)||$url==='')throw new RuntimeException('Name, type and URL are required.');
     if(!preg_match('#^https?://#i',$url))throw new RuntimeException('URL must start with http:// or https://');
-    if($apiKey!==''){$q=$pdo->prepare('UPDATE instances SET name=?,type=?,url=?,api_key=? WHERE id=?');$q->execute([$name,$type,$url,$apiKey,$id]);}
+    if($apiKey!==''){$q=$pdo->prepare('UPDATE instances SET name=?,type=?,url=?,api_key=? WHERE id=?');$q->execute([$name,$type,$url,$secret->protect($apiKey),$id]);}
     else{$q=$pdo->prepare('UPDATE instances SET name=?,type=?,url=? WHERE id=?');$q->execute([$name,$type,$url,$id]);}
     $message='Instance updated.';
     $stmt->execute([$id]);$instance=$stmt->fetch();
@@ -19,7 +19,7 @@ if($_SERVER['REQUEST_METHOD']==='POST'){
 }
 ?>
 <!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Edit Instance · ArrView</title><link rel="stylesheet" href="/assets/style.css"></head><body>
-<header class="topbar"><a class="brand" href="/">ArrView <small class="version-chip">v<?=e(ARRVIEW_VERSION)?></small></a><nav><a href="/">Library</a><a class="active" href="/admin.php">Instances</a><a href="/users.php">Users</a><a href="/support.php">Support</a><span class="user-chip"><?=e($currentUser['username'])?></span><a href="/logout.php">Logout</a></nav></header>
+<header class="topbar"><a class="brand" href="/">ArrView <small class="version-chip">v<?=e(ARRVIEW_VERSION)?></small></a><nav><a href="/">Library</a><a class="active" href="/admin.php">Instances</a><a href="/users.php">Users</a><a href="/system.php">System</a><a href="/support.php">Support</a><span class="user-chip"><?=e($currentUser['username'])?></span><a href="/logout.php">Logout</a></nav></header>
 <main class="wrap admin-wrap"><section class="catalog-head"><div><p class="eyebrow">ADMIN</p><h1>Edit instance</h1><p class="meta"><?=e($instance['name'])?></p></div><a class="button-link" href="/admin.php">← Back</a></section>
 <?php if($message):?><div class="notice success"><?=e($message)?></div><?php endif;?><?php if($error):?><div class="notice error"><?=e($error)?></div><?php endif;?>
 <section class="panel"><form method="post" class="auth-form"><?=csrf_field()?><input type="hidden" name="id" value="<?=$id?>">
