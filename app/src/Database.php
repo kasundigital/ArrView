@@ -55,6 +55,11 @@ CREATE TABLE IF NOT EXISTS movies (
     remote_id INTEGER NOT NULL,
     tmdb_id INTEGER NULL,
     imdb_id TEXT NULL,
+    minimum_availability TEXT NULL,
+    in_cinemas TEXT NULL,
+    digital_release TEXT NULL,
+    physical_release TEXT NULL,
+    availability_date TEXT NULL,
     title TEXT NOT NULL,
     year INTEGER NULL,
     poster_url TEXT NULL,
@@ -274,6 +279,17 @@ SQL);
         if (!in_array('imdb_id', $movieColumnNames, true)) {
             $this->pdo->exec('ALTER TABLE movies ADD COLUMN imdb_id TEXT NULL');
         }
+        foreach ([
+            'minimum_availability' => 'TEXT NULL',
+            'in_cinemas' => 'TEXT NULL',
+            'digital_release' => 'TEXT NULL',
+            'physical_release' => 'TEXT NULL',
+            'availability_date' => 'TEXT NULL',
+        ] as $name => $definition) {
+            if (!in_array($name, $movieColumnNames, true)) {
+                $this->pdo->exec("ALTER TABLE movies ADD COLUMN {$name} {$definition}");
+            }
+        }
 
         $seriesColumnNames = array_column($this->pdo->query('PRAGMA table_info(series)')->fetchAll(), 'name');
         foreach ([
@@ -290,6 +306,7 @@ SQL);
         }
 
         $this->pdo->exec('CREATE INDEX IF NOT EXISTS idx_movies_tmdb ON movies(tmdb_id)');
+        $this->pdo->exec('CREATE INDEX IF NOT EXISTS idx_movies_availability ON movies(has_file, availability_date, monitored)');
         $this->pdo->exec('CREATE INDEX IF NOT EXISTS idx_series_tmdb ON series(tmdb_id)');
     }
 }
