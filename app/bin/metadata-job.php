@@ -3,13 +3,15 @@ declare(strict_types=1);
 require_once dirname(__DIR__) . '/version.php';
 require_once dirname(__DIR__) . '/src/Database.php';
 require_once dirname(__DIR__) . '/src/MetadataService.php';
+require_once dirname(__DIR__) . '/src/SecretService.php';
 
 $jobId=(int)($argv[1]??0);
 if($jobId<1) exit(1);
 $dataDir=getenv('ARRVIEW_DATA') ?: dirname(__DIR__) . '/data';
 $db=new Database(rtrim($dataDir,'/').'/arrview.sqlite');
 $pdo=$db->pdo;
-$service=new MetadataService($pdo);
+$secret=new SecretService($pdo);
+$service=new MetadataService($pdo,$secret);
 $pdo->prepare("UPDATE metadata_jobs SET status='running',started_at=CURRENT_TIMESTAMP,message='Preparing metadata enrichment' WHERE id=?")->execute([$jobId]);
 
 try{
