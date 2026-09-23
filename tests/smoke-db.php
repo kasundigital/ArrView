@@ -24,6 +24,14 @@ switch ($action) {
         echo (string)$pdo->query("SELECT COUNT(*) FROM movies")->fetchColumn();
         break;
 
+    case 'movie-file-path':
+        echo (string)$pdo->query("SELECT json_extract(movie_file_json,'$.path') FROM movies WHERE remote_id=1 LIMIT 1")->fetchColumn();
+        break;
+
+    case 'movie-file-codec':
+        echo (string)$pdo->query("SELECT json_extract(movie_file_json,'$.mediaInfo.videoCodec') FROM movies WHERE remote_id=1 LIMIT 1")->fetchColumn();
+        break;
+
     case 'upcoming-count':
         echo (string)$pdo->query("SELECT COUNT(*) FROM movies
             WHERE availability_date IS NOT NULL AND datetime(availability_date)>datetime('now')")->fetchColumn();
