@@ -29,6 +29,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Installer shell syntax check
+        run: sh -n install.sh
+
       - name: PHP syntax check
         run: |
           docker run --rm -v "$PWD/app:/app:ro" php:8.3-cli-alpine sh -lc \

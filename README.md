@@ -324,7 +324,32 @@ If this solves a problem for you, please consider giving the repository a **⭐ 
 
 ## 🚀 Quick Start
 
-No Git clone is required.
+No Git clone is required. **Install or update ArrView with the same one-line command:**
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/kasundigital/ArrView/main/install.sh | sh
+```
+
+The installer automatically:
+
+- installs ArrView on a fresh server
+- pulls the newest `ghcr.io/kasundigital/arrview:latest` image
+- detects an existing ArrView container and updates it
+- preserves the existing `/app/data` Docker volume
+- preserves the current host port
+- preserves timezone and ArrView encryption/metadata environment settings
+
+Default port: `3223`.
+
+To use another port on a fresh install:
+
+```bash
+ARRVIEW_PORT=8088 sh -c "$(curl -fsSL https://raw.githubusercontent.com/kasundigital/ArrView/main/install.sh)"
+```
+
+### Manual Docker install
+
+If you prefer not to pipe a remote script into the shell:
 
 ```bash
 docker run -d \
@@ -389,23 +414,15 @@ ArrView listens on port `8080` inside the container and the examples expose it a
 
 ## 🔄 Updating ArrView
 
-Your users, instances, settings, and cached library data are stored in the persistent `arrview-data` Docker volume.
+Your users, instances, settings, credentials, and cached library data stay in the persistent Docker volume.
 
-Update with:
+Run the **same one-line command used for installation**:
 
 ```bash
-docker pull ghcr.io/kasundigital/arrview:latest
-
-docker stop arrview
-docker rm arrview
-
-docker run -d \
-  --name arrview \
-  --restart unless-stopped \
-  -p 3223:8080 \
-  -v arrview-data:/app/data \
-  ghcr.io/kasundigital/arrview:latest
+curl -fsSL https://raw.githubusercontent.com/kasundigital/ArrView/main/install.sh | sh
 ```
+
+If ArrView already exists, the script pulls the latest image and safely recreates the container while preserving its data volume, current port, timezone, encryption key, and metadata-service settings.
 
 Your existing data remains intact.
 
