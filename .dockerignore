@@ -1,0 +1,11 @@
+.git
+.github
+.env
+.env.*
+app/data
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm
+*.log
+tests
+docs

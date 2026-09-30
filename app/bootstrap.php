@@ -1,0 +1,328 @@
+<?php
+
+declare(strict_types=1);
+
+require_once __DIR__ . '/version.php';
+require_once __DIR__ . '/src/Database.php';
+require_once __DIR__ . '/src/ArrService.php';
+require_once __DIR__ . '/src/BatchSyncService.php';
+require_once __DIR__ . '/src/MetadataService.php';
+require_once __DIR__ . '/src/SecretService.php';
+require_once __DIR__ . '/src/BackupService.php';
+require_once __DIR__ . '/src/ClientIp.php';
+require_once __DIR__ . '/src/Auth.php';
+require_once __DIR__ . '/src/SetupToken.php';
+
+$dataDir = getenv('ARRVIEW_DATA') ?: (__DIR__ . '/data');
+$databasePath = rtrim($dataDir, '/') . '/arrview.sqlite';
+$db = new Database($databasePath);
+$pdo = $db->pdo;
+$secret = new SecretService($pdo);
+$backup = new BackupService($pdo, $databasePath);
+$arr = new ArrService($pdo);
+$batchSync = new BatchSyncService($pdo);
+$metadata = new MetadataService($pdo, $secret);
+$auth = new Auth($pdo);
+
+// Scheduled full reconciliation is owned exclusively by /app/bin/scheduler.php.
+// Web requests must remain read-focused and must never spawn a competing full-sync worker.
+// Webhooks still launch their own targeted background workers when events arrive.
+
+function app_setting(string $key, ?string $default = null): ?string
+{
+    global $pdo;
+    $stmt = $pdo->prepare('SELECT setting_value FROM app_settings WHERE setting_key=? LIMIT 1');
+    $stmt->execute([$key]);
+    $value = $stmt->fetchColumn();
+    return $value === false ? $default : (string)$value;
+}
+
+function set_app_setting(string $key, ?string $value): void
+{
+    global $pdo;
+    $pdo->prepare(
+        'INSERT INTO app_settings(setting_key,setting_value) VALUES(?,?) ON CONFLICT(setting_key) DO UPDATE SET setting_value=excluded.setting_value'
+    )->execute([$key, $value]);
+}
+
+function reveal_instance(array $instance): array
+{
+    global $secret;
+    if (array_key_exists('api_key', $instance)) {
+        $instance['api_key'] = $secret->reveal((string)$instance['api_key']);
+    }
+    return $instance;
+}
+
+
+
+function diagnostic_cache_read(string $key, int $ttlMinutes): ?array
+{
+    global $pdo;
+    $stmt = $pdo->prepare(
+        "SELECT payload_json,checked_at,
+                CAST((julianday('now')-julianday(checked_at))*86400 AS INTEGER) age_seconds
+         FROM diagnostic_cache
+         WHERE cache_key=? AND datetime(checked_at) >= datetime('now', ?)
+         LIMIT 1"
+    );
+    $stmt->execute([$key, '-' . max(1,$ttlMinutes) . ' minutes']);
+    $row = $stmt->fetch();
+    if (!$row) return null;
+    $payload = json_decode((string)$row['payload_json'], true);
+    if (!is_array($payload)) return null;
+    return [
+        'payload'=>$payload,
+        'checked_at'=>(string)$row['checked_at'],
+        'age_seconds'=>max(0,(int)$row['age_seconds']),
+    ];
+}
+
+function diagnostic_cache_write(string $key, array $payload): void
+{
+    global $pdo;
+    $pdo->prepare(
+        "INSERT INTO diagnostic_cache(cache_key,payload_json,checked_at)
+         VALUES(?,?,CURRENT_TIMESTAMP)
+         ON CONFLICT(cache_key) DO UPDATE SET payload_json=excluded.payload_json,checked_at=CURRENT_TIMESTAMP"
+    )->execute([$key,json_encode($payload,JSON_UNESCAPED_SLASHES)]);
+}
+
+function audio_has_preferred_language(?string $audio, array $preferred): bool
+{
+    if (!$audio || !$preferred) return true;
+    $lower = strtolower($audio);
+    foreach ($preferred as $language) {
+        if ($language !== '' && str_contains($lower, strtolower($language))) return true;
+    }
+    return false;
+}
+
+function viewer_can_see_vod(array $user): bool
+{
+    if (($user['role'] ?? '') === 'admin') return true;
+    return app_setting('viewer_vod_enabled', '0') === '1';
+}
+
+function vod_url_for(int $instanceId, ?string $filePath): ?string
+{
+    global $pdo;
+    if (!$filePath) return null;
+
+    $stmt = $pdo->prepare(
+        'SELECT local_root,public_base_url FROM vod_mappings
+         WHERE enabled=1 AND (instance_id=? OR instance_id IS NULL)
+         ORDER BY CASE WHEN instance_id=? THEN 0 ELSE 1 END, priority ASC, id ASC'
+    );
+    $stmt->execute([$instanceId, $instanceId]);
+
+    $normalizedPath = str_replace('\\', '/', $filePath);
+    foreach ($stmt->fetchAll() as $mapping) {
+        $root = rtrim(str_replace('\\', '/', (string)$mapping['local_root']), '/');
+        $base = rtrim((string)$mapping['public_base_url'], '/');
+        if ($root === '' || $base === '' || !str_starts_with($normalizedPath, $root)) continue;
+        $relative = ltrim(substr($normalizedPath, strlen($root)), '/');
+        if ($relative === '') continue;
+        return $base . '/' . implode('/', array_map('rawurlencode', explode('/', $relative)));
+    }
+
+    // Backward compatibility with the original single global mapping.
+    $root = rtrim(str_replace('\\', '/', (string)app_setting('public_local_root', '')), '/');
+    $base = rtrim((string)app_setting('public_base_url', ''), '/');
+    if ($root !== '' && $base !== '' && str_starts_with($normalizedPath, $root)) {
+        $relative = ltrim(substr($normalizedPath, strlen($root)), '/');
+        if ($relative !== '') return $base . '/' . implode('/', array_map('rawurlencode', explode('/', $relative)));
+    }
+    return null;
+}
+
+function movie_availability_state(array $movie): array
+{
+    if (!empty($movie['has_file'])) {
+        return ['key'=>'available','label'=>'Available','class'=>'status-ok','diagnosable'=>false,'problem'=>false];
+    }
+
+    if (isset($movie['monitored']) && !(int)$movie['monitored']) {
+        return ['key'=>'unmonitored','label'=>'Unmonitored','class'=>'status-muted','diagnosable'=>false,'problem'=>false];
+    }
+
+    $availability = trim((string)($movie['availability_date'] ?? ''));
+    if ($availability !== '') {
+        try {
+            $availableAt = new DateTimeImmutable($availability, new DateTimeZone('UTC'));
+            $now = new DateTimeImmutable('now', new DateTimeZone('UTC'));
+            if ($availableAt > $now) {
+                return [
+                    'key'=>'upcoming',
+                    'label'=>'Upcoming',
+                    'class'=>'status-upcoming',
+                    'diagnosable'=>false,
+                    'problem'=>false,
+                    'availability_date'=>$availability,
+                ];
+            }
+            return [
+                'key'=>'missing',
+                'label'=>'Missing',
+                'class'=>'status-missing',
+                'diagnosable'=>true,
+                'problem'=>true,
+                'availability_date'=>$availability,
+            ];
+        } catch (Throwable) {
+        }
+    }
+
+    return [
+        'key'=>'unknown',
+        'label'=>'Unknown Availability',
+        'class'=>'status-warning',
+        'diagnosable'=>false,
+        'problem'=>false,
+    ];
+}
+
+function asset_url(string $path): string
+{
+    $separator = str_contains($path, '?') ? '&' : '?';
+    return $path . $separator . 'v=' . rawurlencode(ARRVIEW_VERSION);
+}
+
+function brand_head(): string
+{
+    return '<link rel="icon" href="' . e(asset_url('/assets/arrview-icon.svg')) . '" type="image/svg+xml">'
+        . '<link rel="apple-touch-icon" href="' . e(asset_url('/assets/arrview-icon.svg')) . '">'
+        . '<link rel="manifest" href="' . e(asset_url('/manifest.webmanifest')) . '">'
+        . '<meta name="theme-color" content="#0b111c" id="theme-color-meta">'
+        . '<script>(function(){try{var t=localStorage.getItem("arrview-theme")||"system";var d=t==="system"?(matchMedia("(prefers-color-scheme: light)").matches?"light":"dark"):t;document.documentElement.dataset.theme=d;document.documentElement.dataset.themePreference=t;}catch(e){document.documentElement.dataset.theme="dark";}})();</script>'
+        . '<script defer src="' . e(asset_url('/assets/app.js')) . '"></script>';
+}
+
+function brand_logo(bool $version = true): string
+{
+    $versionHtml = $version ? ' <small class="version-chip">v' . e(ARRVIEW_VERSION) . '</small>' : '';
+    return '<a class="brand brand-logo" href="/">'
+        . '<img src="' . e(asset_url('/assets/arrview-icon.svg')) . '" alt="" aria-hidden="true">'
+        . '<span class="brand-word">Arr<span>View</span></span>'
+        . $versionHtml
+        . '</a>';
+}
+
+function apply_branding(string $html): string
+{
+    global $auth;
+    if (!str_contains($html, '</head>')) return $html;
+
+    // Always version static assets so browsers and reverse proxies cannot serve stale UI from an older release.
+    $html = preg_replace(
+        '~href="/assets/style\.css(?:\?[^"]*)?"~',
+        'href="' . e(asset_url('/assets/style.css')) . '"',
+        $html
+    ) ?? $html;
+
+    $html = str_replace(
+        'src="/assets/arrview-logo.svg"',
+        'src="' . e(asset_url('/assets/arrview-logo.svg')) . '"',
+        $html
+    );
+
+    if (!str_contains($html, 'rel="icon"')) {
+        $html = preg_replace('/<\/head>/i', brand_head() . '</head>', $html, 1) ?? $html;
+    }
+
+    $html = preg_replace(
+        '~<a class="brand" href="/">ArrView(?:\s*<small class="version-chip">v<\?=e\(ARRVIEW_VERSION\)\?><\/small>)?<\/a>~',
+        brand_logo(),
+        $html
+    ) ?? $html;
+
+    // Shared application chrome: mobile menu, theme control, and standard footer.
+    if (str_contains($html, '<header class="topbar">') && !str_contains($html, 'class="nav-toggle"')) {
+        $html = preg_replace(
+            '~(<header class="topbar">\s*' . preg_quote(brand_logo(), '~') . ')~',
+            '$1<button type="button" class="nav-toggle" aria-label="Open navigation" aria-expanded="false"><span></span><span></span><span></span></button>',
+            $html,
+            1
+        ) ?? $html;
+
+        $html = preg_replace(
+            '~(<header class="topbar">.*?<nav>)(.*?)(</nav></header>)~s',
+            '$1$2<button type="button" class="theme-toggle" aria-label="Change theme" title="Theme"><span class="theme-icon" aria-hidden="true">◐</span><span class="theme-label">Theme</span></button>$3',
+            $html,
+            1
+        ) ?? $html;
+    }
+
+    if (str_contains($html, '<a href="/logout.php">Logout</a>')) {
+        $logoutForm = '<form class="nav-logout" method="post" action="/logout.php">'
+            . '<input type="hidden" name="csrf_token" value="' . e($auth->csrfToken()) . '">'
+            . '<button type="submit">Logout</button></form>';
+        $html = str_replace('<a href="/logout.php">Logout</a>', $logoutForm, $html);
+    }
+
+    $standardFooter = '<footer class="app-footer"><div><span>ArrView v' . e(ARRVIEW_VERSION) . '</span><span class="footer-dot">•</span><span>Designed &amp; Developed by <a href="https://www.kasunindika.com" target="_blank" rel="noopener noreferrer">Kasun Indika</a></span></div></footer>';
+    if (preg_match('~<footer\b[^>]*>.*?</footer>~s', $html)) {
+        $html = preg_replace('~<footer\b[^>]*>.*?</footer>~s', $standardFooter, $html) ?? $html;
+    } elseif (str_contains($html, '</body>')) {
+        $html = str_replace('</body>', $standardFooter . '</body>', $html);
+    }
+
+    if (str_contains($html, 'class="auth-shell"') && !str_contains($html, 'class="auth-theme-toggle"')) {
+        $authTheme = '<button type="button" class="theme-toggle auth-theme-toggle" aria-label="Change theme" title="Theme"><span class="theme-icon" aria-hidden="true">◐</span><span class="theme-label">Theme</span></button>';
+        $html = str_replace('<body>', '<body>' . $authTheme, $html);
+    }
+
+    $html = str_replace(
+        '<a class="brand auth-brand" href="/">ArrView</a>',
+        '<img class="auth-logo" src="/assets/arrview-logo.svg" alt="ArrView">',
+        $html
+    );
+
+    if (str_contains($html, 'FIRST-TIME SETUP') && !str_contains($html, 'class="auth-logo"')) {
+        $html = str_replace(
+            '<section class="auth-card">',
+            '<section class="auth-card"><img class="auth-logo" src="/assets/arrview-logo.svg" alt="ArrView">',
+            $html
+        );
+    }
+
+    return $html;
+}
+
+// Buffer normally, then apply shared branding once at shutdown.
+// Running apply_branding as an output-handler callback could produce a zero-byte
+// authenticated response on larger pages. Keep the decorator out of PHP's
+// output-handler context and always fall back to the original HTML.
+ob_start();
+register_shutdown_function(static function (): void {
+    if (ob_get_level() < 1) return;
+
+    $html = ob_get_clean();
+    if ($html === false || $html === '') return;
+
+    try {
+        $branded = apply_branding($html);
+        echo $branded !== '' ? $branded : $html;
+    } catch (Throwable $e) {
+        error_log('ArrView branding fallback: ' . $e->getMessage());
+        echo $html;
+    }
+});
+
+function e(?string $value): string
+{
+    return htmlspecialchars((string)$value, ENT_QUOTES, 'UTF-8');
+}
+
+function redirect(string $url): never
+{
+    header('Location: ' . $url);
+    exit;
+}
+
+
+function csrf_field(): string
+{
+    global $auth;
+    return '<input type="hidden" name="csrf_token" value="' . e($auth->csrfToken()) . '">';
+}

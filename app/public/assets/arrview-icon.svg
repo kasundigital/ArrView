@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-labelledby="t">
+<title id="t">ArrView</title>
+<defs>
+  <linearGradient id="g1" x1="0" y1="1" x2="1" y2="0"><stop stop-color="#1768ff"/><stop offset=".52" stop-color="#1fb7ff"/><stop offset="1" stop-color="#15f0d3"/></linearGradient>
+  <linearGradient id="g2" x1="0" y1="1" x2="0" y2="0"><stop stop-color="#1350d9"/><stop offset="1" stop-color="#159de8"/></linearGradient>
+</defs>
+<rect x="48" y="166" width="66" height="220" rx="27" fill="url(#g2)" opacity=".86"/>
+<rect x="105" y="132" width="78" height="272" rx="31" fill="url(#g2)"/>
+<path d="M205 86c-30-9-54 12-54 43v273c0 32 27 51 57 42l241-72c20-6 33-24 33-45V190c0-22-14-40-35-47L205 86Z" fill="url(#g1)"/>
+<path d="M197 266c57-82 159-112 239 0-80 112-182 82-239 0Z" fill="#071326"/>
+<path d="M293 212c-17-11-39 1-39 22v65c0 21 22 34 39 22l54-36c17-11 17-37 0-48l-54-25Z" fill="url(#g1)"/>
+</svg>

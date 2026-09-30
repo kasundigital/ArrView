@@ -1,0 +1,46 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1440" height="900" viewBox="0 0 1440 900">
+<rect width="1440" height="900" fill="#0b111c"/>
+<rect x="0" y="0" width="1440" height="64" fill="#080d15"/>
+<text x="56" y="40" font-family="Arial,sans-serif" font-size="24" font-weight="700" fill="#f4f7fb">ArrView</text>
+<text x="166" y="40" font-family="Arial,sans-serif" font-size="10" fill="#8fa1ba">v1.0.0</text>
+<text x="930" y="39" font-family="Arial,sans-serif" font-size="13" fill="#aab6c8">Movies   Series   Support   Admin   System</text>
+<text x="70" y="120" font-family="Arial,sans-serif" font-size="11" font-weight="700" fill="#7c9cff">RADARR MOVIES</text>
+<text x="70" y="162" font-family="Arial,sans-serif" font-size="36" font-weight="700" fill="#f4f7fb">Movies</text>
+<rect x="70" y="190" width="1300" height="58" rx="12" fill="#111b2a" stroke="#253651"/>
+<rect x="88" y="205" width="310" height="28" rx="7" fill="#0a1018" stroke="#31445e"/>
+<text x="105" y="224" font-family="Arial,sans-serif" font-size="11" fill="#788aa4">Search title…</text>
+<rect x="412" y="205" width="160" height="28" rx="7" fill="#0a1018" stroke="#31445e"/>
+<text x="429" y="224" font-family="Arial,sans-serif" font-size="11" fill="#b8c5d8">All instances</text>
+<rect x="584" y="205" width="160" height="28" rx="7" fill="#0a1018" stroke="#31445e"/>
+<text x="601" y="224" font-family="Arial,sans-serif" font-size="11" fill="#b8c5d8">All audio languages</text>
+<g font-family="Arial,sans-serif" font-size="11">
+<rect x="70" y="268" width="84" height="30" rx="15" fill="#17233a" stroke="#53698f"/><text x="96" y="288" fill="#dce5f3">All 50k</text>
+<rect x="162" y="268" width="100" height="30" rx="15" fill="#21131a" stroke="#6d3341"/><text x="183" y="288" fill="#ff9bad">Missing 724</text>
+<rect x="270" y="268" width="105" height="30" rx="15" fill="#102034" stroke="#31587f"/><text x="292" y="288" fill="#8cc8ff">Upcoming 91</text>
+<rect x="383" y="268" width="110" height="30" rx="15" fill="#10251c" stroke="#31684b"/><text x="405" y="288" fill="#73e3ad">Available</text>
+</g>
+<rect x="70" y="320" width="1300" height="460" rx="14" fill="#0e1724" stroke="#253651"/>
+<rect x="70" y="320" width="1300" height="42" rx="14" fill="#111d2d"/>
+<g font-family="Arial,sans-serif" font-size="10" font-weight="700" fill="#8294ad">
+<text x="92" y="346">TITLE ↕</text><text x="530" y="346">YEAR ↕</text><text x="620" y="346">FILE STATUS ↕</text><text x="760" y="346">AUDIO LANGUAGE ↕</text><text x="940" y="346">QUALITY ↕</text><text x="1080" y="346">INSTANCE ↕</text><text x="1240" y="346">ACTION</text>
+</g>
+<g font-family="Arial,sans-serif" font-size="12">
+<line x1="70" y1="420" x2="1370" y2="420" stroke="#1f3048"/>
+<text x="92" y="395" fill="#f1f5fb" font-weight="700">An Orange from Jaffna</text><text x="530" y="395" fill="#b7c4d5">2024</text>
+<rect x="620" y="378" width="72" height="24" rx="12" fill="#10251c" stroke="#31684b"/><text x="634" y="395" fill="#73e3ad">Available</text>
+<text x="760" y="395" fill="#d9e3f1">Arabic</text><text x="940" y="395" fill="#d9e3f1">WEBDL-1080p</text><text x="1080" y="395" fill="#d9e3f1">Radarr Main</text><text x="1240" y="395" fill="#7c9cff">Details</text>
+<line x1="70" y1="478" x2="1370" y2="478" stroke="#1f3048"/>
+<text x="92" y="453" fill="#f1f5fb" font-weight="700">Future Test Movie</text><text x="530" y="453" fill="#b7c4d5">2030</text>
+<rect x="620" y="436" width="72" height="24" rx="12" fill="#102034" stroke="#31587f"/><text x="633" y="453" fill="#8cc8ff">Upcoming</text>
+<text x="760" y="453" fill="#8a99ad">No file</text><text x="940" y="453" fill="#8a99ad">—</text><text x="1080" y="453" fill="#d9e3f1">Radarr Main</text><text x="1240" y="453" fill="#8cc8ff">Not released yet</text>
+<line x1="70" y1="536" x2="1370" y2="536" stroke="#1f3048"/>
+<text x="92" y="511" fill="#f1f5fb" font-weight="700">Missing Example</text><text x="530" y="511" fill="#b7c4d5">2025</text>
+<rect x="620" y="494" width="64" height="24" rx="12" fill="#29131b" stroke="#7b3548"/><text x="633" y="511" fill="#ff8da1">Missing</text>
+<text x="760" y="511" fill="#8a99ad">No file</text><text x="940" y="511" fill="#8a99ad">—</text><text x="1080" y="511" fill="#d9e3f1">Radarr Main</text><text x="1240" y="511" fill="#ff8da1">Why missing?</text>
+</g>
+<g font-family="Arial,sans-serif" font-size="11">
+<rect x="545" y="810" width="86" height="32" rx="8" fill="#111b2a" stroke="#31445e"/><text x="566" y="831" fill="#dce5f3">← Previous</text>
+<text x="650" y="831" fill="#8fa1ba">Page 121 of 500</text>
+<rect x="766" y="810" width="72" height="32" rx="8" fill="#111b2a" stroke="#31445e"/><text x="784" y="831" fill="#dce5f3">Next →</text>
+</g>
+</svg>

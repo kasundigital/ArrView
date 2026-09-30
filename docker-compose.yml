@@ -1,0 +1,28 @@
+services:
+  arrview:
+    image: ghcr.io/kasundigital/arrview:latest
+    container_name: arrview
+    restart: unless-stopped
+    ports:
+      - "${ARRVIEW_PORT:-3223}:8080"
+    environment:
+      TZ: ${TZ:-Asia/Colombo}
+      ARRVIEW_DATA: /app/data
+      # Only if ArrView runs behind a reverse proxy / Cloudflare: comma-separated proxy IPs or CIDRs.
+      # Forwarded client IPs are ignored unless the direct peer is listed here.
+      ARRVIEW_TRUSTED_PROXIES: ${ARRVIEW_TRUSTED_PROXIES:-}
+      # Optional. API keys are encrypted by default with a generated key in the data volume;
+      # set this only to supply your own key.
+      ARRVIEW_ENCRYPTION_KEY: ${ARRVIEW_ENCRYPTION_KEY:-}
+      # Optional: URL of a shared ArrView metadata service you run. Leave empty to use
+      # your own TMDB API key from Admin → TMDB Metadata.
+      ARRVIEW_METADATA_API_URL: ${ARRVIEW_METADATA_API_URL:-}
+      # Only set these on the official ArrView metadata service host, never on normal clients:
+      ARRVIEW_SHARED_TMDB_BEARER_TOKEN: ${ARRVIEW_SHARED_TMDB_BEARER_TOKEN:-}
+      ARRVIEW_FREE_METADATA_MONTHLY_LIMIT: ${ARRVIEW_FREE_METADATA_MONTHLY_LIMIT:-1000}
+      ARRVIEW_FREE_METADATA_HOURLY_LIMIT: ${ARRVIEW_FREE_METADATA_HOURLY_LIMIT:-120}
+    volumes:
+      - arrview-data:/app/data
+
+volumes:
+  arrview-data:
