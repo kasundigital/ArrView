@@ -74,9 +74,6 @@ INSERT INTO movies (instance_id, remote_id, tmdb_id, imdb_id, minimum_availabili
 VALUES (:instance_id, :remote_id, :tmdb_id, :imdb_id, :minimum_availability, :in_cinemas, :digital_release, :physical_release, :availability_date, :title, :year, :poster_url, :has_file, :monitored, :quality, :audio_languages, :path, :file_size, :movie_file_json, :details_json, CURRENT_TIMESTAMP)
 ON CONFLICT(instance_id, remote_id) DO UPDATE SET
  tmdb_id=excluded.tmdb_id, imdb_id=excluded.imdb_id,
- minimum_availability=excluded.minimum_availability, in_cinemas=excluded.in_cinemas,
- digital_release=excluded.digital_release, physical_release=excluded.physical_release,
- availability_date=excluded.availability_date,
  title=excluded.title, year=excluded.year, poster_url=excluded.poster_url,
  has_file=excluded.has_file, monitored=excluded.monitored, quality=excluded.quality,
  audio_languages=excluded.audio_languages, path=excluded.path, file_size=excluded.file_size,
@@ -316,7 +313,7 @@ SQL;
                         $audioLanguages = $names ? implode(', ', $names) : null;
 
                         $updateSeries = $this->pdo->prepare(
-                            'UPDATE series SET audio_languages=?, episode_file_count=?, aired_missing_count=?, future_missing_count=?, missing_audio_count=? WHERE id=?'
+                            'UPDATE series SET audio_languages=?, episode_file_count=?, aired_missing_count=?, future_missing_count=?, missing_audio_count=?, language_inconsistent=? WHERE id=?'
                         );
                         $updateSeries->execute([
                             $audioLanguages,
